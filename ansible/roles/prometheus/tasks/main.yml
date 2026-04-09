@@ -1,0 +1,49 @@
+---
+# prometheus/tasks/main.yml — Deploy Prometheus + Pushgateway
+
+- name: Create Prometheus config directory
+  ansible.builtin.file:
+    path: /etc/prometheus
+    state: directory
+    mode: "0755"
+
+- name: Template Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /etc/prometheus/prometheus.yml
+    mode: "0644"
+  notify: Restart Prometheus
+
+- name: Copy alert rules
+  ansible.builtin.copy:
+    src: "{{ project_root }}/monitoring/prometheus/rules/"
+    dest: /etc/prometheus/rules/
+    mode: "0644"
+  notify: Restart Prometheus
+
+- name: Deploy Prometheus container
+  community.docker.docker_container:
+    name: prometheus
+    image: prom/prometheus:v2.51.0
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - /etc/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+
+- name: Deploy Pushgateway container
+  community.docker.docker_container:
+    name: pushgateway
+    image: prom/pushgateway:v1.8.0
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "9091:9091"

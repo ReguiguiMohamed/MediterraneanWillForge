@@ -1,0 +1,41 @@
+---
+# common/tasks/main.yml — Base system hardening and package setup
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install common system packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - git
+      - unzip
+      - htop
+      - jq
+      - net-tools
+      - python3-pip
+      - python3-venv
+    state: present
+
+- name: Set system timezone to UTC
+  community.general.timezone:
+    name: UTC
+
+- name: Create med-ops system user
+  ansible.builtin.user:
+    name: medops
+    groups: docker
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Ensure project directory permissions
+  ansible.builtin.file:
+    path: /opt/med-ops-fortress
+    owner: medops
+    group: medops
+    mode: "0755"
+    recurse: true

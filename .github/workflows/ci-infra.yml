@@ -1,0 +1,87 @@
+name: CI — Infrastructure
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "terraform/**"
+      - "ansible/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "ansible/**"
+
+jobs:
+  terraform-validate:
+    name: Terraform Validate & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.8.0"
+
+      - name: Terraform Format Check (root)
+        run: terraform fmt -check -recursive terraform/
+
+      - name: Terraform Init (modules)
+        run: |
+          for dir in terraform/modules/*/; do
+            echo "Initialising $dir"
+            terraform -chdir="$dir" init -backend=false
+            terraform -chdir="$dir" validate
+          done
+
+      - name: Install tflint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Run tflint
+        run: |
+          tflint --init
+          tflint --recursive
+
+  ansible-lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ansible-lint
+        run: pip install ansible ansible-lint
+
+      - name: Lint Ansible playbooks
+        run: ansible-lint ansible/site.yml
+
+  prometheus-config-validate:
+    name: Validate Prometheus Config
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate prometheus.yml with promtool
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/monitoring/prometheus:/etc/prometheus:ro" \
+            prom/prometheus:v2.51.0 \
+            promtool check config /etc/prometheus/prometheus.yml
+
+      - name: Validate alert rules
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/monitoring/prometheus/rules:/rules:ro" \
+            prom/prometheus:v2.51.0 \
+            promtool check rules /rules/infra_alerts.yml /rules/pipeline_alerts.yml

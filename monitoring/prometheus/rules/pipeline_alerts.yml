@@ -1,0 +1,70 @@
+groups:
+  - name: data_pipeline
+    interval: 60s
+    rules:
+
+      # ── Data freshness ──────────────────────────────────────────────────────
+      - alert: BronzeLayerStale
+        expr: >
+          (time() - pipeline_last_successful_run_timestamp{layer="bronze"}) > 90000
+        for: 5m
+        labels:
+          severity: warning
+          layer: bronze
+        annotations:
+          summary: "Bronze layer has not been updated in >25 hours"
+          description: "Last successful bronze ingestion was {{ $value | humanizeDuration }} ago. Expected cadence: daily."
+
+      - alert: SilverLayerStale
+        expr: >
+          (time() - pipeline_last_successful_run_timestamp{layer="silver"}) > 93600
+        for: 5m
+        labels:
+          severity: warning
+          layer: silver
+        annotations:
+          summary: "Silver transformation has not run in >26 hours"
+          description: "Last successful silver run was {{ $value | humanizeDuration }} ago."
+
+      # ── Row count anomalies ─────────────────────────────────────────────────
+      - alert: BronzeRowCountDrop
+        expr: >
+          pipeline_ingested_rows{layer="bronze"} <
+          pipeline_ingested_rows{layer="bronze"} offset 1d * 0.5
+        for: 10m
+        labels:
+          severity: warning
+          layer: bronze
+        annotations:
+          summary: "Bronze row count dropped >50% vs yesterday"
+          description: "Ingested {{ $value }} rows today vs expected baseline. Possible API issue."
+
+      # ── Quality gate failures ───────────────────────────────────────────────
+      - alert: DataQualityCheckFailed
+        expr: pipeline_quality_check_failures_total > 0
+        for: 1m
+        labels:
+          severity: pipeline
+        annotations:
+          summary: "Data quality check failed: {{ $labels.check_name }}"
+          description: "{{ $value }} failure(s) on check {{ $labels.check_name }} in layer {{ $labels.layer }}."
+
+      # ── Pipeline duration ───────────────────────────────────────────────────
+      - alert: PipelineDurationHigh
+        expr: pipeline_duration_seconds{stage="bronze_ingest"} > 1800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bronze ingestion taking unusually long"
+          description: "Bronze ingestion took {{ $value | humanizeDuration }}. Expected under 30 minutes."
+
+      # ── Schema drift ───────────────────────────────────────────────────────
+      - alert: SchemaDriftDetected
+        expr: pipeline_schema_drift_events_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Schema drift detected in {{ $labels.table }}"
+          description: "{{ $value }} schema change event(s) detected. Review Delta table schema evolution."

@@ -1,0 +1,101 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# Mediterranean Ops Fortress — Vagrantfile
+# Provisions a single reproducible Ubuntu 22.04 LTS VM that hosts the entire
+# local stack: MinIO, Docker, Prometheus, Grafana, and Alertmanager.
+# No half-measures. The environment is forged, not improvised.
+
+VAGRANTFILE_API_VERSION = "2"
+
+VM_NAME     = "med-ops-fortress"
+VM_BOX      = "bento/ubuntu-22.04"
+VM_CPUS     = 4
+VM_MEMORY   = 6144   # 6 GB — enough for the full observability stack + jobs
+
+# Port forwarding map  host => guest
+PORTS = {
+  9000  => 9000,   # MinIO API
+  9001  => 9001,   # MinIO Console
+  9090  => 9090,   # Prometheus
+  9091  => 9091,   # Prometheus Pushgateway
+  3000  => 3000,   # Grafana
+  9093  => 9093,   # Alertmanager
+  8080  => 8080,   # (reserved — Spark UI / ad-hoc services)
+}
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+
+  config.vm.box              = VM_BOX
+  config.vm.box_check_update = false
+  config.vm.hostname         = VM_NAME
+
+  # ── Network ────────────────────────────────────────────────────────────────
+  config.vm.network "private_network", ip: "192.168.56.10"
+
+  PORTS.each do |host_port, guest_port|
+    config.vm.network "forwarded_port",
+      guest: guest_port,
+      host:  host_port,
+      auto_correct: true
+  end
+
+  # ── Shared folders ─────────────────────────────────────────────────────────
+  # Mount the project root into the VM so Ansible, Docker, and scripts share
+  # the same source tree without duplication.
+  config.vm.synced_folder "../", "/opt/med-ops-fortress",
+    type:         "virtualbox",
+    owner:        "vagrant",
+    group:        "vagrant",
+    mount_options: ["dmode=775", "fmode=664"]
+
+  # ── Provider: VirtualBox ───────────────────────────────────────────────────
+  config.vm.provider "virtualbox" do |vb|
+    vb.name   = VM_NAME
+    vb.cpus   = VM_CPUS
+    vb.memory = VM_MEMORY
+
+    # Disable audio and USB to keep the VM lean
+    vb.customize ["modifyvm", :id, "--audio",   "none"]
+    vb.customize ["modifyvm", :id, "--usb",     "off"]
+    vb.customize ["modifyvm", :id, "--usbehci", "off"]
+
+    # Improve clock accuracy for time-series metrics
+    vb.customize ["guestproperty", "set", :id,
+                  "/VirtualBox/GuestAdd/VBoxService/--timesync-min-adjust", "1"]
+  end
+
+  # ── Bootstrap provisioner ──────────────────────────────────────────────────
+  # Minimal shell bootstrap installs Ansible on the guest, then hands off to
+  # the Ansible site playbook for all further configuration. This keeps the
+  # Vagrantfile thin and the real logic in version-controlled playbooks.
+  config.vm.provision "shell",
+    path:       "scripts/bootstrap.sh",
+    privileged: true
+
+  # ── Ansible provisioner ────────────────────────────────────────────────────
+  # Runs the full site playbook inside the VM (ansible_local).
+  config.vm.provision "ansible_local" do |ansible|
+    ansible.playbook       = "/opt/med-ops-fortress/ansible/site.yml"
+    ansible.inventory_path = "/opt/med-ops-fortress/ansible/inventory/hosts.ini"
+    ansible.limit          = "all"
+    ansible.verbose        = false
+    ansible.extra_vars     = {
+      ansible_python_interpreter: "/usr/bin/python3"
+    }
+  end
+
+  # ── Post-up message ────────────────────────────────────────────────────────
+  config.vm.post_up_message = <<~MSG
+    ╔══════════════════════════════════════════════════════╗
+    ║      Mediterranean Ops Fortress  —  VM Ready         ║
+    ╠══════════════════════════════════════════════════════╣
+    ║  MinIO Console  →  http://localhost:9001             ║
+    ║  Prometheus     →  http://localhost:9090             ║
+    ║  Grafana        →  http://localhost:3000             ║
+    ║  Alertmanager   →  http://localhost:9093             ║
+    ╚══════════════════════════════════════════════════════╝
+    SSH: vagrant ssh  |  Project: /opt/med-ops-fortress
+  MSG
+
+end
