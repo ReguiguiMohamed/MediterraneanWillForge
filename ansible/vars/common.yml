@@ -1,0 +1,48 @@
+---
+# ansible/vars/common.yml
+# Single source of truth for all role variables.
+# Sensitive values should be overridden via Ansible Vault or extra-vars in CI.
+# Every variable here has a safe local default so vagrant up works out of the box.
+
+# ── Project ───────────────────────────────────────────────────────────────────
+project_name: med-ops-fortress
+project_root:  /opt/med-ops-fortress
+pipeline_env:  local
+pipeline_region: TN-MED
+
+# ── MinIO ─────────────────────────────────────────────────────────────────────
+minio_access_key: minioadmin
+minio_secret_key: minioadmin
+minio_bucket_bronze: bronze
+minio_bucket_silver: silver
+minio_bucket_gold:   gold
+minio_data_dir:      /data/minio
+
+# ── Grafana ───────────────────────────────────────────────────────────────────
+grafana_admin_user:     admin
+grafana_admin_password: fortress
+grafana_port:           3000
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus_port:           9090
+prometheus_retention_days: 30
+pushgateway_port:          9091
+
+# ── Alertmanager ─────────────────────────────────────────────────────────────
+alertmanager_port: 9093
+
+# Alert routing — override in production with real webhook/SMTP
+smtp_host:             "localhost:587"
+alert_from_email:      "alerts@med-ops-fortress.local"
+webhook_url:           "http://localhost:5001/alerts"
+critical_webhook_url:  "http://localhost:5001/critical"
+pipeline_webhook_url:  "http://localhost:5001/pipeline"
+
+# ── Docker image versions (pin for reproducibility) ──────────────────────────
+docker_minio_image:        "quay.io/minio/minio:latest"
+docker_prometheus_image:   "prom/prometheus:v2.51.0"
+docker_pushgateway_image:  "prom/pushgateway:v1.8.0"
+docker_alertmanager_image: "prom/alertmanager:v0.27.0"
+docker_grafana_image:      "grafana/grafana-oss:10.4.2"
+docker_cadvisor_image:     "gcr.io/cadvisor/cadvisor:v0.49.1"
+docker_node_exporter_image: "prom/node-exporter:v1.8.0"

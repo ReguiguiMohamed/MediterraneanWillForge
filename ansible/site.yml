@@ -9,7 +9,7 @@
   gather_facts: true
 
   vars_files:
-    - "{{ project_root | default('/opt/med-ops-fortress') }}/ansible/vars/common.yml"
+    - "vars/common.yml"
 
   pre_tasks:
     - name: Confirm target host
