@@ -1,0 +1,47 @@
+---
+# grafana/tasks/main.yml — Deploy Grafana with provisioned datasources and dashboards
+
+- name: Create Grafana provisioning directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/grafana/provisioning/datasources
+    - /etc/grafana/provisioning/dashboards
+
+- name: Copy Grafana datasource provisioning
+  ansible.builtin.copy:
+    src: "{{ project_root }}/monitoring/grafana/provisioning/datasources/"
+    dest: /etc/grafana/provisioning/datasources/
+    mode: "0644"
+
+- name: Copy Grafana dashboard provisioning config
+  ansible.builtin.copy:
+    src: "{{ project_root }}/monitoring/grafana/provisioning/dashboards/"
+    dest: /etc/grafana/provisioning/dashboards/
+    mode: "0644"
+
+- name: Copy Grafana dashboard JSON files
+  ansible.builtin.copy:
+    src: "{{ project_root }}/monitoring/grafana/dashboards/"
+    dest: /var/lib/grafana/dashboards/
+    mode: "0644"
+
+- name: Deploy Grafana container
+  community.docker.docker_container:
+    name: grafana
+    image: grafana/grafana-oss:10.4.2
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "3000:3000"
+    env:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password | default('fortress') }}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/pipeline_health.json
+    volumes:
+      - /etc/grafana/provisioning:/etc/grafana/provisioning:ro
+      - /var/lib/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana

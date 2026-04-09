@@ -1,0 +1,143 @@
+name: med-ops-fortress
+
+networks:
+  fortress:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+services:
+
+  # ── Lakehouse storage ────────────────────────────────────────────────────────
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: med-ops-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - fortress
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+
+  # ── Observability ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: med-ops-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - fortress
+    depends_on:
+      - pushgateway
+
+  pushgateway:
+    image: prom/pushgateway:v1.8.0
+    container_name: med-ops-pushgateway
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    networks:
+      - fortress
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: med-ops-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    ports:
+      - "9093:9093"
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks:
+      - fortress
+
+  grafana:
+    image: grafana/grafana-oss:10.4.2
+    container_name: med-ops-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-fortress}
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/pipeline_health.json
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - fortress
+    depends_on:
+      - prometheus
+
+  # ── Data pipeline jobs ────────────────────────────────────────────────────────
+  ingestion:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    container_name: med-ops-ingestion
+    profiles:
+      - jobs
+    env_file:
+      - ../.env
+    environment:
+      MINIO_ENDPOINT:   http://minio:9000
+      PUSHGATEWAY_URL:  http://pushgateway:9091
+    volumes:
+      - ../data:/app/data:ro
+    networks:
+      - fortress
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  quality:
+    build:
+      context: ./quality
+      dockerfile: Dockerfile
+    container_name: med-ops-quality
+    profiles:
+      - jobs
+    env_file:
+      - ../.env
+    environment:
+      MINIO_ENDPOINT:  http://minio:9000
+      PUSHGATEWAY_URL: http://pushgateway:9091
+    volumes:
+      - ../data:/app/data:ro
+    networks:
+      - fortress
+    depends_on:
+      - minio

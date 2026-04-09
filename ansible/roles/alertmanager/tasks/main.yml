@@ -1,0 +1,30 @@
+---
+# alertmanager/tasks/main.yml — Deploy Alertmanager
+
+- name: Create Alertmanager config directory
+  ansible.builtin.file:
+    path: /etc/alertmanager
+    state: directory
+    mode: "0755"
+
+- name: Template Alertmanager configuration
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: /etc/alertmanager/alertmanager.yml
+    mode: "0644"
+  notify: Restart Alertmanager
+
+- name: Deploy Alertmanager container
+  community.docker.docker_container:
+    name: alertmanager
+    image: prom/alertmanager:v0.27.0
+    state: started
+    restart_policy: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - /etc/alertmanager:/etc/alertmanager:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.external-url=http://localhost:9093"

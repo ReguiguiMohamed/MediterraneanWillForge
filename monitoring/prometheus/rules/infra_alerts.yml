@@ -1,0 +1,51 @@
+groups:
+  - name: infrastructure
+    interval: 30s
+    rules:
+
+      - alert: ContainerDown
+        expr: absent(container_last_seen{name=~"med-ops-.*"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container {{ $labels.name }} is down"
+          description: "Container {{ $labels.name }} has not been seen for more than 2 minutes."
+
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{name=~"med-ops-.*"}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.name }}"
+          description: "Container {{ $labels.name }} CPU usage is {{ $value | printf \"%.1f\" }}%."
+
+      - alert: HighMemoryUsage
+        expr: >
+          (container_memory_usage_bytes{name=~"med-ops-.*"} /
+           container_spec_memory_limit_bytes{name=~"med-ops-.*"}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.name }}"
+          description: "Container {{ $labels.name }} memory usage is {{ $value | printf \"%.1f\" }}%."
+
+      - alert: MinIODown
+        expr: up{job="minio"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinIO lakehouse is unreachable"
+          description: "MinIO has been down for more than 1 minute. Lakehouse writes will fail."
+
+      - alert: DiskUsageCritical
+        expr: (node_filesystem_size_bytes - node_filesystem_free_bytes) / node_filesystem_size_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk usage critical on {{ $labels.mountpoint }}"
+          description: "Disk usage is {{ $value | printf \"%.1f\" }}% on {{ $labels.mountpoint }}."

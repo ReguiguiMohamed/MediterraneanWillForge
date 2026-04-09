@@ -1,0 +1,141 @@
+name: CI — Data Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "data/**"
+      - "docker/ingestion/**"
+      - "docker/quality/**"
+      - "tests/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "data/**"
+      - "tests/**"
+
+jobs:
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: docker/ingestion/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r docker/ingestion/requirements.txt
+          pip install ruff black pytest pytest-cov
+
+      - name: Lint with ruff
+        run: ruff check data/ tests/
+
+      - name: Check formatting with black
+        run: black --check data/ tests/
+
+      - name: Run unit tests
+        run: |
+          pytest tests/unit/ -v --tb=short \
+            --cov=data --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          flags: unit
+          fail_ci_if_error: false
+
+  build-ingestion-image:
+    name: Build Ingestion Docker Image
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ingestion image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/ingestion/Dockerfile
+          push: false
+          tags: med-ops-ingestion:${{ github.sha }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+  build-quality-image:
+    name: Build Quality Docker Image
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build quality image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/quality/Dockerfile
+          push: false
+          tags: med-ops-quality:${{ github.sha }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [build-ingestion-image, build-quality-image]
+
+    services:
+      minio:
+        image: quay.io/minio/minio:latest
+        env:
+          MINIO_ROOT_USER:     minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+          - 9001:9001
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        command: server /data --console-address ":9001"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r docker/ingestion/requirements.txt pytest
+
+      - name: Run integration tests
+        env:
+          MINIO_ENDPOINT:  http://localhost:9000
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+          PIPELINE_ENV:    ci
+        run: pytest tests/integration/ -v --tb=short

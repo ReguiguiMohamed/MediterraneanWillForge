@@ -1,0 +1,29 @@
+# Mediterranean Ops Fortress — Data Quality Job Image
+# Runs Great Expectations suites against Bronze and Silver layers.
+# Quality is not optional. It is enforced.
+
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+      great-expectations==0.18.19 \
+      deltalake==0.18.1 \
+      pyarrow==16.1.0 \
+      boto3==1.34.131 \
+      s3fs==2024.6.0 \
+      prometheus-client==0.20.0 \
+      python-dotenv==1.0.1 \
+      loguru==0.7.2
+
+COPY ../../data/quality ./quality
+COPY ../../data/schemas  ./schemas
+
+RUN useradd -m -u 1001 medops && chown -R medops:medops /app
+USER medops
+
+CMD ["python", "-m", "quality.run_checks"]
