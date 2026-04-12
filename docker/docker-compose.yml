@@ -135,7 +135,11 @@ services:
     environment:
       MINIO_ENDPOINT:             http://minio:9000
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
+      MINIO_BUCKET_BRONZE:        bronze
+      MINIO_BUCKET_SILVER:        silver
+      QUALITY_LOOKBACK_DAYS:      "1"
     networks:
       - fortress
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy

@@ -1,22 +1,23 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "BronzeAirQualityRecord",
-  "description": "Raw air quality record from Copernicus CAMS or EEA Discomap APIs",
+  "description": "Raw air quality record from Open-Meteo (gridded CAMS model) or OpenAQ v2 (station observations)",
   "type": "object",
-  "required": ["station_id", "date", "latitude", "longitude"],
+  "required": ["station_id", "date", "latitude", "longitude", "source", "partition_date"],
   "properties": {
-    "station_id":      { "type": "string",  "description": "Unique monitoring station identifier" },
-    "station_name":    { "type": "string",  "description": "Human-readable station name" },
-    "latitude":        { "type": "number",  "minimum": -90,   "maximum": 90 },
-    "longitude":       { "type": "number",  "minimum": -180,  "maximum": 180 },
-    "date":            { "type": "string",  "format": "date" },
-    "pm2p5":           { "type": "number",  "minimum": 0,     "description": "PM2.5 concentration µg/m³" },
-    "pm10":            { "type": "number",  "minimum": 0,     "description": "PM10 concentration µg/m³" },
-    "no2":             { "type": "number",  "minimum": 0,     "description": "NO2 concentration µg/m³" },
-    "o3":              { "type": "number",  "minimum": 0,     "description": "O3 concentration µg/m³" },
-    "source":          { "type": "string",  "enum": ["copernicus", "eea", "synthetic"] },
-    "ingestion_date":  { "type": "string",  "format": "date" },
-    "ingestion_ts":    { "type": "string",  "description": "UTC ISO-8601 ingestion timestamp" },
-    "partition_date":  { "type": "string",  "format": "date", "description": "Hive partition column" }
+    "station_id":         { "type": "string",  "description": "Station or grid-point identifier" },
+    "station_name":       { "type": "string",  "description": "Human-readable station or city name" },
+    "city":               { "type": ["string", "null"], "description": "City name (null for gridded sources)" },
+    "country_code":       { "type": "string",  "minLength": 2, "maxLength": 2, "description": "ISO-3166-1 alpha-2" },
+    "latitude":           { "type": "number",  "minimum": -90,   "maximum": 90 },
+    "longitude":          { "type": "number",  "minimum": -180,  "maximum": 180 },
+    "date":               { "type": "string",  "format": "date" },
+    "pm2_5":              { "type": ["number", "null"], "minimum": 0, "description": "PM2.5 daily mean µg/m³" },
+    "pm10":               { "type": ["number", "null"], "minimum": 0, "description": "PM10 daily mean µg/m³" },
+    "nitrogen_dioxide":   { "type": ["number", "null"], "minimum": 0, "description": "NO2 daily mean µg/m³" },
+    "ozone":              { "type": ["number", "null"], "minimum": 0, "description": "O3 daily mean µg/m³" },
+    "source":             { "type": "string",  "enum": ["openmeteo", "openaq"] },
+    "ingestion_ts":       { "type": "string",  "description": "UTC ISO-8601 ingestion timestamp" },
+    "partition_date":     { "type": "string",  "format": "date", "description": "Hive partition column YYYY-MM-DD" }
   }
 }
