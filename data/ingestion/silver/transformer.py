@@ -168,11 +168,16 @@ def _aqi_category(pm25: float | None) -> str:
     """US EPA PM2.5 AQI breakpoints."""
     if pm25 is None or (isinstance(pm25, float) and np.isnan(pm25)):
         return "unknown"
-    if pm25 <= 12.0:   return "good"
-    if pm25 <= 35.4:   return "moderate"
-    if pm25 <= 55.4:   return "unhealthy_sensitive"
-    if pm25 <= 150.4:  return "unhealthy"
-    if pm25 <= 250.4:  return "very_unhealthy"
+    if pm25 <= 12.0:
+        return "good"
+    if pm25 <= 35.4:
+        return "moderate"
+    if pm25 <= 55.4:
+        return "unhealthy_sensitive"
+    if pm25 <= 150.4:
+        return "unhealthy"
+    if pm25 <= 250.4:
+        return "very_unhealthy"
     return "hazardous"
 
 
