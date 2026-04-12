@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 import pandas as pd
@@ -359,7 +359,7 @@ def run() -> int:
     path = f"s3://{bronze_bucket}/openmeteo/air_quality"
     df = load_recent_partition(path, storage_opts, lookback)
     if df.empty:
-        logger.warning(f"[bronze/openmeteo] No recent data found — skipping checks.")
+        logger.warning("[bronze/openmeteo] No recent data found — skipping checks.")
     else:
         logger.info(f"[bronze/openmeteo] Loaded {len(df)} rows.")
         all_results.extend(run_bronze_checks(df, "openmeteo"))
@@ -368,7 +368,7 @@ def run() -> int:
     path = f"s3://{bronze_bucket}/openaq/air_quality"
     df = load_recent_partition(path, storage_opts, lookback)
     if df.empty:
-        logger.warning(f"[bronze/openaq] No recent data found — skipping checks.")
+        logger.warning("[bronze/openaq] No recent data found — skipping checks.")
     else:
         logger.info(f"[bronze/openaq] Loaded {len(df)} rows.")
         all_results.extend(run_bronze_checks(df, "openaq"))
@@ -377,7 +377,7 @@ def run() -> int:
     path = f"s3://{silver_bucket}/air_quality"
     df = load_recent_partition(path, storage_opts, lookback)
     if df.empty:
-        logger.warning(f"[silver] No recent data found — skipping checks.")
+        logger.warning("[silver] No recent data found — skipping checks.")
     else:
         logger.info(f"[silver] Loaded {len(df)} rows.")
         all_results.extend(run_silver_checks(df))
