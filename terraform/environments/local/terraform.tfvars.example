@@ -1,8 +1,14 @@
+# terraform/environments/local/terraform.tfvars.example
+# ────────────────────────────────────────────────────────
+# Copy to terraform.tfvars and adjust as needed.
+
 environment            = "local"
 project_name           = "med-ops-fortress"
+
 minio_access_key       = "minioadmin"
 minio_secret_key       = "minioadmin"
 grafana_admin_password = "fortress"
+
 prometheus_retention_days = 30
 
 lakehouse_buckets = {

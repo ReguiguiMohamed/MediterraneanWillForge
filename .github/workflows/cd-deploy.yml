@@ -1,89 +1,118 @@
-name: CD — Deploy
+name: CD — Publish Images
+
+# Triggered manually or automatically when Docker/data code changes on main.
+# Builds and pushes versioned images to GitHub Container Registry (ghcr.io).
+# Infrastructure (Terraform/Ansible) targets a local Vagrant VM — no remote
+# state exists, so Terraform is NOT executed in CI. Run it locally:
+#   make tf-apply   →  provisions local Docker resources
+#   make provision  →  runs Ansible against the Vagrant VM
 
 on:
   push:
     branches: [main]
+    paths:
+      - "docker/**"
+      - "data/ingestion/**"
   workflow_dispatch:
     inputs:
-      environment:
-        description: Target environment
-        required: true
-        default: local
+      dry_run:
+        description: "Dry run (build only, no push)"
+        required: false
+        default: "false"
         type: choice
-        options: [local, staging]
+        options: ["true", "false"]
 
 concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: false
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  REPO:     ${{ github.repository }}
 
 jobs:
-  deploy-infrastructure:
-    name: Deploy Infrastructure (Terraform + Ansible)
+  publish-ingestion:
+    name: Build & Publish Ingestion Image
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    environment: ${{ github.event.inputs.environment || 'local' }}
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Log in to GitHub Container Registry
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: docker/login-action@v3
         with:
-          terraform_version: "1.8.0"
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Terraform Init
-        run: terraform -chdir=terraform/environments/local init
-        env:
-          TF_VAR_minio_access_key:       ${{ secrets.MINIO_ACCESS_KEY }}
-          TF_VAR_minio_secret_key:       ${{ secrets.MINIO_SECRET_KEY }}
-          TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPO }}/ingestion
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Terraform Apply
-        run: terraform -chdir=terraform/environments/local apply -auto-approve
-        env:
-          TF_VAR_minio_access_key:       ${{ secrets.MINIO_ACCESS_KEY }}
-          TF_VAR_minio_secret_key:       ${{ secrets.MINIO_SECRET_KEY }}
-          TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-  trigger-ingestion:
-    name: Trigger Daily Ingestion
+      - name: Build and push ingestion image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/ingestion/Dockerfile
+          push: ${{ github.event.inputs.dry_run != 'true' }}
+          tags:   ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+  publish-quality:
+    name: Build & Publish Quality Image
     runs-on: ubuntu-latest
-    needs: deploy-infrastructure
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build and run bronze ingestion
-        run: |
-          docker build -t med-ops-ingestion:latest \
-            -f docker/ingestion/Dockerfile .
-          docker run --rm \
-            -e MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }} \
-            -e MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }} \
-            -e MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }} \
-            -e CAMS_API_KEY=${{ secrets.CAMS_API_KEY }} \
-            -e PUSHGATEWAY_URL=${{ secrets.PUSHGATEWAY_URL }} \
-            med-ops-ingestion:latest \
-            python -m ingestion.bronze.copernicus_ingestor
+      - name: Log in to GitHub Container Registry
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run silver transformation
-        run: |
-          docker run --rm \
-            -e MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }} \
-            -e MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }} \
-            -e MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }} \
-            -e PUSHGATEWAY_URL=${{ secrets.PUSHGATEWAY_URL }} \
-            med-ops-ingestion:latest \
-            python -m ingestion.silver.transformer
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPO }}/quality
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Run data quality checks
-        run: |
-          docker build -t med-ops-quality:latest \
-            -f docker/quality/Dockerfile .
-          docker run --rm \
-            -e MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }} \
-            -e MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }} \
-            -e MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }} \
-            med-ops-quality:latest
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push quality image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/quality/Dockerfile
+          push: ${{ github.event.inputs.dry_run != 'true' }}
+          tags:   ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max

@@ -6,19 +6,21 @@ on:
     paths:
       - "terraform/**"
       - "ansible/**"
+      - "monitoring/prometheus/**"
   pull_request:
     branches: [main]
     paths:
       - "terraform/**"
       - "ansible/**"
+      - "monitoring/prometheus/**"
 
 jobs:
   terraform-validate:
-    name: Terraform Validate & Lint
+    name: Terraform Validate & Format
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Terraform
@@ -26,31 +28,34 @@ jobs:
         with:
           terraform_version: "1.8.0"
 
-      - name: Terraform Format Check (root)
+      - name: Check formatting
         run: terraform fmt -check -recursive terraform/
 
-      - name: Terraform Init (modules)
-        run: |
-          for dir in terraform/modules/*/; do
-            echo "Initialising $dir"
-            terraform -chdir="$dir" init -backend=false
-            terraform -chdir="$dir" validate
-          done
+      # Validate from the root module — modules are called from here,
+      # not validated in isolation (they require provider configuration).
+      - name: Terraform Init (root, no backend)
+        run: terraform -chdir=terraform init -backend=false
+
+      - name: Terraform Validate
+        run: terraform -chdir=terraform validate
 
       - name: Install tflint
         uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.51.1
 
       - name: Run tflint
+        working-directory: terraform
         run: |
           tflint --init
-          tflint --recursive
+          tflint
 
   ansible-lint:
     name: Ansible Lint
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
@@ -58,30 +63,36 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install ansible-lint
+      - name: Install Ansible and lint tooling
         run: pip install ansible ansible-lint
 
-      - name: Lint Ansible playbooks
+      # Collections must be present before ansible-lint can resolve module names.
+      - name: Install Ansible Galaxy collections
+        run: ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Lint site playbook
         run: ansible-lint ansible/site.yml
 
-  prometheus-config-validate:
-    name: Validate Prometheus Config
+  prometheus-validate:
+    name: Validate Prometheus Config & Rules
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate prometheus.yml with promtool
+      - name: Check prometheus.yml
         run: |
           docker run --rm \
             -v "${{ github.workspace }}/monitoring/prometheus:/etc/prometheus:ro" \
             prom/prometheus:v2.51.0 \
             promtool check config /etc/prometheus/prometheus.yml
 
-      - name: Validate alert rules
+      - name: Check alert rule files
         run: |
           docker run --rm \
             -v "${{ github.workspace }}/monitoring/prometheus/rules:/rules:ro" \
             prom/prometheus:v2.51.0 \
-            promtool check rules /rules/infra_alerts.yml /rules/pipeline_alerts.yml
+            promtool check rules \
+              /rules/infra_alerts.yml \
+              /rules/pipeline_alerts.yml

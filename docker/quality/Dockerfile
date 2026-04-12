@@ -1,6 +1,6 @@
 # Mediterranean Ops Fortress — Data Quality Job Image
-# Runs Great Expectations suites against Bronze and Silver layers.
-# Quality is not optional. It is enforced.
+# Build context: repository root (not docker/quality/).
+# docker build -f docker/quality/Dockerfile .
 
 FROM python:3.11-slim
 
@@ -20,8 +20,9 @@ RUN pip install --no-cache-dir \
       python-dotenv==1.0.1 \
       loguru==0.7.2
 
-COPY ../../data/quality ./quality
-COPY ../../data/schemas  ./schemas
+# Paths relative to repo root (build context)
+COPY data/quality/  ./quality/
+COPY data/schemas/  ./schemas/
 
 RUN useradd -m -u 1001 medops && chown -R medops:medops /app
 USER medops

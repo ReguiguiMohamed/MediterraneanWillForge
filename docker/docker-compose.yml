@@ -14,15 +14,15 @@ volumes:
 
 services:
 
-  # ── Lakehouse storage ────────────────────────────────────────────────────────
+  # ── Lakehouse storage ─────────────────────────────────────────────────────────
   minio:
     image: quay.io/minio/minio:latest
     container_name: med-ops-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER:            ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD:        ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_PROMETHEUS_AUTH_TYPE: public
     ports:
       - "9000:9000"
@@ -32,7 +32,7 @@ services:
     networks:
       - fortress
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test:     ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout:  10s
       retries:  3
@@ -103,20 +103,20 @@ services:
       - prometheus
 
   # ── Data pipeline jobs ────────────────────────────────────────────────────────
+  # Activated with --profile jobs. Build context is the repo root so both
+  # Dockerfiles can access data/ and docker/ from a single context.
   ingestion:
     build:
-      context: ./ingestion
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/ingestion/Dockerfile
     container_name: med-ops-ingestion
     profiles:
       - jobs
     env_file:
       - ../.env
     environment:
-      MINIO_ENDPOINT:   http://minio:9000
-      PUSHGATEWAY_URL:  http://pushgateway:9091
-    volumes:
-      - ../data:/app/data:ro
+      MINIO_ENDPOINT:              http://minio:9000
+      PROMETHEUS_PUSHGATEWAY_URL:  http://pushgateway:9091
     networks:
       - fortress
     depends_on:
@@ -125,18 +125,16 @@ services:
 
   quality:
     build:
-      context: ./quality
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/quality/Dockerfile
     container_name: med-ops-quality
     profiles:
       - jobs
     env_file:
       - ../.env
     environment:
-      MINIO_ENDPOINT:  http://minio:9000
-      PUSHGATEWAY_URL: http://pushgateway:9091
-    volumes:
-      - ../data:/app/data:ro
+      MINIO_ENDPOINT:             http://minio:9000
+      PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
     networks:
       - fortress
     depends_on:
