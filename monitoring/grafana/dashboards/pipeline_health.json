@@ -6,11 +6,11 @@
   "annotations": { "list": [] },
   "description": "Mediterranean Ops Fortress — Data Pipeline Health",
   "editable": false,
-  "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
+
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
@@ -18,6 +18,7 @@
       "title": "Pipeline Freshness",
       "type": "row"
     },
+
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -26,28 +27,29 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 86400 },
-              { "color": "red",    "value": 90000 }
+              { "color": "green",  "value": null   },
+              { "color": "yellow", "value": 86400  },
+              { "color": "red",    "value": 90000  }
             ]
           },
           "unit": "s",
           "mappings": []
         }
       },
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 1 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
       "id": 1,
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
-      "title": "Bronze Layer Age",
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "title": "Bronze — Open-Meteo Age",
       "type": "stat",
       "targets": [
         {
           "datasource": { "type": "prometheus" },
-          "expr": "time() - pipeline_last_successful_run_timestamp{layer=\"bronze\"}",
-          "legendFormat": "Bronze age"
+          "expr": "time() - pipeline_last_successful_run_timestamp{layer=\"bronze\",source=\"openmeteo\"}",
+          "legendFormat": "OpenMeteo"
         }
       ]
     },
+
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -56,27 +58,28 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 90000 },
-              { "color": "red",    "value": 93600 }
+              { "color": "green",  "value": null   },
+              { "color": "yellow", "value": 86400  },
+              { "color": "red",    "value": 90000  }
             ]
           },
           "unit": "s"
         }
       },
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
       "id": 2,
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
-      "title": "Silver Layer Age",
+      "title": "Bronze — OpenAQ Age",
       "type": "stat",
       "targets": [
         {
           "datasource": { "type": "prometheus" },
-          "expr": "time() - pipeline_last_successful_run_timestamp{layer=\"silver\"}",
-          "legendFormat": "Silver age"
+          "expr": "time() - pipeline_last_successful_run_timestamp{layer=\"bronze\",source=\"openaq\"}",
+          "legendFormat": "OpenAQ"
         }
       ]
     },
+
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -85,26 +88,58 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red",   "value": 1 }
+              { "color": "green",  "value": null   },
+              { "color": "yellow", "value": 90000  },
+              { "color": "red",    "value": 93600  }
             ]
           },
-          "unit": "short"
+          "unit": "s"
         }
       },
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
       "id": 3,
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
-      "title": "Quality Check Failures",
+      "title": "Silver Age",
       "type": "stat",
       "targets": [
         {
           "datasource": { "type": "prometheus" },
-          "expr": "sum(pipeline_quality_check_failures_total) or vector(0)",
-          "legendFormat": "Failures"
+          "expr": "time() - pipeline_last_successful_run_timestamp{layer=\"silver\"}",
+          "legendFormat": "Silver"
         }
       ]
     },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null   },
+              { "color": "yellow", "value": 93600  },
+              { "color": "red",    "value": 97200  }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "title": "Gold Age",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "time() - pipeline_last_successful_run_timestamp{layer=\"gold\"}",
+          "legendFormat": "Gold"
+        }
+      ]
+    },
+
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
@@ -112,6 +147,7 @@
       "title": "Row Counts & Throughput",
       "type": "row"
     },
+
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -122,20 +158,30 @@
         }
       },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
-      "id": 4,
+      "id": 5,
       "options": { "tooltip": { "mode": "multi" } },
-      "title": "Ingested Rows by Layer",
+      "title": "Ingested Rows by Source",
       "type": "timeseries",
       "targets": [
         {
           "datasource": { "type": "prometheus" },
-          "expr": "pipeline_ingested_rows{layer=\"bronze\"}",
-          "legendFormat": "Bronze"
+          "expr": "pipeline_ingested_rows{layer=\"bronze\", source=\"openmeteo\"}",
+          "legendFormat": "Bronze / OpenMeteo"
         },
         {
           "datasource": { "type": "prometheus" },
-          "expr": "pipeline_ingested_rows{layer=\"silver\"}",
-          "legendFormat": "Silver"
+          "expr": "pipeline_ingested_rows{layer=\"bronze\", source=\"openaq\"}",
+          "legendFormat": "Bronze / OpenAQ"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "pipeline_ingested_rows{layer=\"silver\", source=\"openmeteo\"}",
+          "legendFormat": "Silver / OpenMeteo"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "pipeline_ingested_rows{layer=\"silver\", source=\"openaq\"}",
+          "legendFormat": "Silver / OpenAQ"
         },
         {
           "datasource": { "type": "prometheus" },
@@ -144,6 +190,7 @@
         }
       ]
     },
+
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -154,14 +201,19 @@
         }
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
-      "id": 5,
+      "id": 6,
       "title": "Pipeline Stage Duration",
       "type": "timeseries",
       "targets": [
         {
           "datasource": { "type": "prometheus" },
-          "expr": "pipeline_duration_seconds{stage=\"bronze_ingest\"}",
-          "legendFormat": "Bronze ingest"
+          "expr": "pipeline_duration_seconds{stage=\"bronze_openmeteo\"}",
+          "legendFormat": "Bronze OpenMeteo"
+        },
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "pipeline_duration_seconds{stage=\"bronze_openaq\"}",
+          "legendFormat": "Bronze OpenAQ"
         },
         {
           "datasource": { "type": "prometheus" },
@@ -175,46 +227,86 @@
         }
       ]
     },
+
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
       "id": 102,
-      "title": "Schema & Quality Events",
+      "title": "Data Quality",
       "type": "row"
     },
+
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "color": { "mode": "palette-classic" },
-          "custom": { "drawStyle": "bars", "fillOpacity": 80 }
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red",   "value": 1    }
+            ]
+          },
+          "unit": "short"
         }
       },
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 15 },
-      "id": 6,
-      "title": "Schema Drift Events",
-      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 15 },
+      "id": 7,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "title": "Total Quality Failures",
+      "type": "stat",
       "targets": [
         {
           "datasource": { "type": "prometheus" },
-          "expr": "increase(pipeline_schema_drift_events_total[1h])",
-          "legendFormat": "{{ table }}"
+          "expr": "sum(pipeline_quality_check_failures_total) or vector(0)",
+          "legendFormat": "Failures"
         }
       ]
     },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null   },
+              { "color": "yellow", "value": 90000  },
+              { "color": "red",    "value": 93600  }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 15 },
+      "id": 8,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "title": "Quality Runner Age",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "max(time() - pipeline_last_quality_run_timestamp)",
+          "legendFormat": "Quality age"
+        }
+      ]
+    },
+
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "color": { "mode": "palette-classic" },
-          "custom": { "drawStyle": "bars", "fillOpacity": 80 }
+          "custom": { "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 1 }
         }
       },
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 15 },
-      "id": 7,
-      "title": "Quality Check Failures by Check",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "id": 9,
+      "title": "Quality Failures by Check & Layer",
       "type": "timeseries",
       "targets": [
         {
@@ -223,7 +315,30 @@
           "legendFormat": "{{ check_name }} / {{ layer }}"
         }
       ]
+    },
+
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10 }
+        }
+      },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 19 },
+      "id": 10,
+      "title": "Quality Failures — Bronze vs Silver (rate 1h)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "sum by(layer) (increase(pipeline_quality_check_failures_total[1h]))",
+          "legendFormat": "{{ layer }}"
+        }
+      ]
     }
+
   ],
   "refresh": "30s",
   "schemaVersion": 39,
@@ -233,5 +348,5 @@
   "timezone": "browser",
   "title": "Pipeline Health",
   "uid": "med-ops-pipeline",
-  "version": 1
+  "version": 2
 }

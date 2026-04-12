@@ -13,7 +13,9 @@ groups:
           layer: bronze
         annotations:
           summary: "Bronze layer has not been updated in >25 hours"
-          description: "Last successful bronze ingestion was {{ $value | humanizeDuration }} ago. Expected cadence: daily."
+          description: >
+            Last successful bronze ingestion was {{ $value | humanizeDuration }} ago.
+            Expected cadence: daily. Check ingestion container logs.
 
       - alert: SilverLayerStale
         expr: >
@@ -24,20 +26,49 @@ groups:
           layer: silver
         annotations:
           summary: "Silver transformation has not run in >26 hours"
-          description: "Last successful silver run was {{ $value | humanizeDuration }} ago."
+          description: >
+            Last successful silver run was {{ $value | humanizeDuration }} ago.
+            Silver runs after bronze — verify bronze completed successfully.
+
+      - alert: GoldLayerStale
+        expr: >
+          (time() - pipeline_last_successful_run_timestamp{layer="gold"}) > 97200
+        for: 5m
+        labels:
+          severity: warning
+          layer: gold
+        annotations:
+          summary: "Gold marts have not been rebuilt in >27 hours"
+          description: >
+            Last gold mart build was {{ $value | humanizeDuration }} ago.
+            Gold depends on silver — check the full pipeline execution order.
+
+      - alert: QualityChecksStale
+        expr: >
+          (time() - pipeline_last_quality_run_timestamp) > 93600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Quality checks have not run in >26 hours"
+          description: >
+            Last quality check run was {{ $value | humanizeDuration }} ago for
+            layer {{ $labels.layer }}. Quality container may have exited early.
 
       # ── Row count anomalies ─────────────────────────────────────────────────
       - alert: BronzeRowCountDrop
         expr: >
-          pipeline_ingested_rows{layer="bronze"} <
-          pipeline_ingested_rows{layer="bronze"} offset 1d * 0.5
+          pipeline_ingested_rows{layer="bronze"}
+          < pipeline_ingested_rows{layer="bronze"} offset 1d * 0.5
         for: 10m
         labels:
           severity: warning
           layer: bronze
         annotations:
-          summary: "Bronze row count dropped >50% vs yesterday"
-          description: "Ingested {{ $value }} rows today vs expected baseline. Possible API issue."
+          summary: "Bronze row count dropped >50% vs yesterday (source: {{ $labels.source }})"
+          description: >
+            Ingested {{ $value }} rows for source {{ $labels.source }} today vs
+            expected baseline. Possible upstream API degradation or rate-limiting.
 
       # ── Quality gate failures ───────────────────────────────────────────────
       - alert: DataQualityCheckFailed
@@ -47,24 +78,30 @@ groups:
           severity: pipeline
         annotations:
           summary: "Data quality check failed: {{ $labels.check_name }}"
-          description: "{{ $value }} failure(s) on check {{ $labels.check_name }} in layer {{ $labels.layer }}."
+          description: >
+            {{ $value }} failure(s) on check '{{ $labels.check_name }}'
+            in layer '{{ $labels.layer }}'. Investigate quality runner logs.
 
       # ── Pipeline duration ───────────────────────────────────────────────────
-      - alert: PipelineDurationHigh
-        expr: pipeline_duration_seconds{stage="bronze_ingest"} > 1800
+      - alert: BronzeIngestSlow
+        expr: >
+          pipeline_duration_seconds{stage=~"bronze_(openmeteo|openaq)"} > 1800
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Bronze ingestion taking unusually long"
-          description: "Bronze ingestion took {{ $value | humanizeDuration }}. Expected under 30 minutes."
+          summary: "Bronze ingest ({{ $labels.stage }}) taking unusually long"
+          description: >
+            Stage {{ $labels.stage }} took {{ $value | humanizeDuration }}.
+            Expected under 30 minutes. Possible API timeout or MinIO write bottleneck.
 
-      # ── Schema drift ───────────────────────────────────────────────────────
-      - alert: SchemaDriftDetected
-        expr: pipeline_schema_drift_events_total > 0
-        for: 1m
+      - alert: SilverTransformSlow
+        expr: pipeline_duration_seconds{stage="silver_transform"} > 3600
+        for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Schema drift detected in {{ $labels.table }}"
-          description: "{{ $value }} schema change event(s) detected. Review Delta table schema evolution."
+          summary: "Silver transformation taking >1 hour"
+          description: >
+            Silver transform took {{ $value | humanizeDuration }}.
+            May indicate large partition backlog or Delta write contention.
