@@ -29,6 +29,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   REPO:     ${{ github.repository }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   publish-ingestion:
@@ -64,7 +65,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push ingestion image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/ingestion/Dockerfile
@@ -107,7 +108,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push quality image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/quality/Dockerfile
