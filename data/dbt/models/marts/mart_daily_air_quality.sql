@@ -1,6 +1,6 @@
 -- mart_daily_air_quality.sql
--- Daily air quality summary per station.
--- The analytics layer: clean, typed, documented, tested.
+-- Daily air quality summary per country, source, and AQI tier.
+-- The analytics endpoint: clean, typed, partitioned, documented.
 
 {{ config(
     materialized = 'table',
@@ -9,18 +9,19 @@
 
 select
     observation_date,
-    station_id,
-    station_name,
-    lat,
-    lon,
-    round(avg(pm25_ug_m3), 2)  as daily_mean_pm25,
-    round(max(pm25_ug_m3), 2)  as daily_max_pm25,
-    round(avg(pm10_ug_m3), 2)  as daily_mean_pm10,
-    round(avg(no2_ug_m3),  2)  as daily_mean_no2,
-    round(avg(o3_ug_m3),   2)  as daily_mean_o3,
-    max(who_pm25_exceeded)      as who_pm25_exceeded,
-    max(aqi_category)           as worst_aqi_category,
-    current_timestamp()         as mart_ts
+    country_code,
+    source,
+    aqi_category                         as dominant_aqi_tier,
+    count(distinct station_id)           as station_count,
+    round(avg(pm25_ug_m3),  2)           as daily_mean_pm25,
+    round(max(pm25_ug_m3),  2)           as daily_max_pm25,
+    round(avg(pm10_ug_m3),  2)           as daily_mean_pm10,
+    round(avg(no2_ug_m3),   2)           as daily_mean_no2,
+    round(avg(o3_ug_m3),    2)           as daily_mean_o3,
+    round(avg(cast(who_pm25_exceeded as double)) * 100, 1) as who_pm25_exceed_pct,
+    round(avg(cast(who_no2_exceeded  as double)) * 100, 1) as who_no2_exceed_pct,
+    round(avg(data_completeness),   4)   as mean_data_completeness,
+    current_timestamp()                  as mart_ts
 
 from {{ ref('stg_air_quality') }}
-group by 1, 2, 3, 4, 5
+group by 1, 2, 3, 4

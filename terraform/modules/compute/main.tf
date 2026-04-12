@@ -49,8 +49,14 @@ resource "docker_container" "prometheus" {
     container_path = "/prometheus"
   }
 
-  networks_advanced { name = var.network_id }
-  labels { label = "project"; value = var.project_name }
+  networks_advanced {
+    name = var.network_id
+  }
+
+  labels {
+    label = "project"
+    value = var.project_name
+  }
 }
 
 # ── Pushgateway ───────────────────────────────────────────────────────────────
@@ -64,7 +70,9 @@ resource "docker_container" "pushgateway" {
     external = 9091
   }
 
-  networks_advanced { name = var.network_id }
+  networks_advanced {
+    name = var.network_id
+  }
 }
 
 # ── Alertmanager ──────────────────────────────────────────────────────────────
@@ -89,7 +97,9 @@ resource "docker_container" "alertmanager" {
     read_only      = true
   }
 
-  networks_advanced { name = var.network_id }
+  networks_advanced {
+    name = var.network_id
+  }
 }
 
 # ── Grafana ───────────────────────────────────────────────────────────────────
@@ -125,6 +135,12 @@ resource "docker_container" "grafana" {
     container_path = "/var/lib/grafana"
   }
 
-  networks_advanced { name = var.network_id }
-  labels { label = "project"; value = var.project_name }
+  networks_advanced {
+    name = var.network_id
+  }
+
+  labels {
+    label = "project"
+    value = var.project_name
+  }
 }
