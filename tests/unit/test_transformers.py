@@ -20,48 +20,54 @@ from data.ingestion.silver.transformer import (
 
 # ── Shared fixtures ────────────────────────────────────────────────────────────
 
+
 @pytest.fixture()
 def openmeteo_df():
     """Minimal openmeteo-style Bronze row (one grid point per city)."""
-    return pd.DataFrame({
-        "station_id":        ["tunis_tn",  "algiers_dz", "cairo_eg"],
-        "station_name":      ["Tunis",     "Algiers",    "Cairo"],
-        "country_code":      ["TN",        "DZ",         "EG"],
-        "latitude":          [36.82,       36.74,        30.06],
-        "longitude":         [10.17,        3.06,        31.24],
-        "date":              ["2024-06-01", "2024-06-01", "2024-06-01"],
-        "pm2_5":             [12.5,         55.0,         None],
-        "pm10":              [20.0,         80.0,         15.0],
-        "nitrogen_dioxide":  [ 5.0,         40.0,          8.0],
-        "ozone":             [80.0,        140.0,         70.0],
-        "source":            ["openmeteo"] * 3,
-        "ingestion_ts":      ["2024-06-02T00:00:00Z"] * 3,
-        "partition_date":    ["2024-06-01"] * 3,
-    })
+    return pd.DataFrame(
+        {
+            "station_id": ["tunis_tn", "algiers_dz", "cairo_eg"],
+            "station_name": ["Tunis", "Algiers", "Cairo"],
+            "country_code": ["TN", "DZ", "EG"],
+            "latitude": [36.82, 36.74, 30.06],
+            "longitude": [10.17, 3.06, 31.24],
+            "date": ["2024-06-01", "2024-06-01", "2024-06-01"],
+            "pm2_5": [12.5, 55.0, None],
+            "pm10": [20.0, 80.0, 15.0],
+            "nitrogen_dioxide": [5.0, 40.0, 8.0],
+            "ozone": [80.0, 140.0, 70.0],
+            "source": ["openmeteo"] * 3,
+            "ingestion_ts": ["2024-06-02T00:00:00Z"] * 3,
+            "partition_date": ["2024-06-01"] * 3,
+        }
+    )
 
 
 @pytest.fixture()
 def openaq_df():
     """Minimal openaq-style Bronze row (real station observations)."""
-    return pd.DataFrame({
-        "station_id":        ["1001",       "1002",       "1003"],
-        "station_name":      ["Tunis-Bardo", "Annaba",    "Casablanca-Ain"],
-        "city":              ["Tunis",       "Annaba",    "Casablanca"],
-        "country_code":      ["TN",          "DZ",        "MA"],
-        "latitude":          [36.82,         36.90,       33.57],
-        "longitude":         [10.13,          7.77,       -7.59],
-        "date":              ["2024-06-01"] * 3,
-        "pm2_5":             [18.0,           9.5,        None],
-        "pm10":              [32.0,          16.0,        44.0],
-        "nitrogen_dioxide":  [28.0,          11.0,        20.0],
-        "ozone":             [95.0,          60.0,        88.0],
-        "source":            ["openaq"] * 3,
-        "ingestion_ts":      ["2024-06-02T00:00:00Z"] * 3,
-        "partition_date":    ["2024-06-01"] * 3,
-    })
+    return pd.DataFrame(
+        {
+            "station_id": ["1001", "1002", "1003"],
+            "station_name": ["Tunis-Bardo", "Annaba", "Casablanca-Ain"],
+            "city": ["Tunis", "Annaba", "Casablanca"],
+            "country_code": ["TN", "DZ", "MA"],
+            "latitude": [36.82, 36.90, 33.57],
+            "longitude": [10.13, 7.77, -7.59],
+            "date": ["2024-06-01"] * 3,
+            "pm2_5": [18.0, 9.5, None],
+            "pm10": [32.0, 16.0, 44.0],
+            "nitrogen_dioxide": [28.0, 11.0, 20.0],
+            "ozone": [95.0, 60.0, 88.0],
+            "source": ["openaq"] * 3,
+            "ingestion_ts": ["2024-06-02T00:00:00Z"] * 3,
+            "partition_date": ["2024-06-01"] * 3,
+        }
+    )
 
 
 # ── clean() ───────────────────────────────────────────────────────────────────
+
 
 class TestClean:
     def test_drops_row_with_null_station_id(self, openmeteo_df):
@@ -106,6 +112,7 @@ class TestClean:
 
 # ── enrich() ──────────────────────────────────────────────────────────────────
 
+
 class TestEnrich:
     def test_aqi_category_present(self, openmeteo_df):
         cleaned = clean(openmeteo_df, "openmeteo")
@@ -114,28 +121,28 @@ class TestEnrich:
         assert enriched["aqi_category"].notna().all()
 
     def test_who_pm25_flag_below_threshold(self, openmeteo_df):
-        cleaned  = clean(openmeteo_df, "openmeteo")
+        cleaned = clean(openmeteo_df, "openmeteo")
         enriched = enrich(cleaned)
         # tunis_tn pm2_5=12.5 < 15 → 0
         row = enriched[enriched["station_id"] == "tunis_tn"].iloc[0]
         assert row["who_pm25_exceed"] == 0
 
     def test_who_pm25_flag_above_threshold(self, openmeteo_df):
-        cleaned  = clean(openmeteo_df, "openmeteo")
+        cleaned = clean(openmeteo_df, "openmeteo")
         enriched = enrich(cleaned)
         # algiers_dz pm2_5=55.0 > 15 → 1
         row = enriched[enriched["station_id"] == "algiers_dz"].iloc[0]
         assert row["who_pm25_exceed"] == 1
 
     def test_who_no2_flag(self, openaq_df):
-        cleaned  = clean(openaq_df, "openaq")
+        cleaned = clean(openaq_df, "openaq")
         enriched = enrich(cleaned)
         # Tunis-Bardo NO2=28.0 > 25 → 1
         row = enriched[enriched["station_id"] == "1001"].iloc[0]
         assert row["who_no2_exceed"] == 1
 
     def test_data_completeness_full_row(self, openmeteo_df):
-        cleaned  = clean(openmeteo_df, "openmeteo")
+        cleaned = clean(openmeteo_df, "openmeteo")
         enriched = enrich(cleaned)
         # tunis_tn has all 4 pollutants → completeness = 1.0
         row = enriched[enriched["station_id"] == "tunis_tn"].iloc[0]
@@ -143,33 +150,35 @@ class TestEnrich:
 
     def test_data_completeness_partial_row(self, openmeteo_df):
         # cairo_eg has pm2_5=None → 3/4 pollutants present
-        cleaned  = clean(openmeteo_df, "openmeteo")
+        cleaned = clean(openmeteo_df, "openmeteo")
         enriched = enrich(cleaned)
         row = enriched[enriched["station_id"] == "cairo_eg"].iloc[0]
         assert row["data_completeness"] == pytest.approx(0.75)
 
     def test_drops_rows_below_min_completeness(self):
-        df = pd.DataFrame({
-            "station_id":       ["X-001"],
-            "station_name":     ["Ghost"],
-            "country_code":     ["TN"],
-            "latitude":         [36.0],
-            "longitude":        [10.0],
-            "date":             ["2024-06-01"],
-            "pm2_5":            [None],
-            "pm10":             [None],
-            "nitrogen_dioxide": [None],
-            "ozone":            [None],
-            "source":           ["openmeteo"],
-            "partition_date":   ["2024-06-01"],
-            "ingestion_ts":     ["2024-06-02T00:00:00Z"],
-        })
-        cleaned  = clean(df, "openmeteo")
+        df = pd.DataFrame(
+            {
+                "station_id": ["X-001"],
+                "station_name": ["Ghost"],
+                "country_code": ["TN"],
+                "latitude": [36.0],
+                "longitude": [10.0],
+                "date": ["2024-06-01"],
+                "pm2_5": [None],
+                "pm10": [None],
+                "nitrogen_dioxide": [None],
+                "ozone": [None],
+                "source": ["openmeteo"],
+                "partition_date": ["2024-06-01"],
+                "ingestion_ts": ["2024-06-02T00:00:00Z"],
+            }
+        )
+        cleaned = clean(df, "openmeteo")
         enriched = enrich(cleaned)
         assert enriched.empty
 
     def test_silver_ts_added(self, openmeteo_df):
-        cleaned  = clean(openmeteo_df, "openmeteo")
+        cleaned = clean(openmeteo_df, "openmeteo")
         enriched = enrich(cleaned)
         assert "silver_ts" in enriched.columns
         assert enriched["silver_ts"].notna().all()
@@ -177,21 +186,25 @@ class TestEnrich:
 
 # ── _aqi_category() ───────────────────────────────────────────────────────────
 
+
 class TestAQICategory:
-    @pytest.mark.parametrize("pm25,expected", [
-        (0.0,   "good"),
-        (12.0,  "good"),
-        (12.1,  "moderate"),
-        (35.4,  "moderate"),
-        (35.5,  "unhealthy_sensitive"),
-        (55.4,  "unhealthy_sensitive"),
-        (55.5,  "unhealthy"),
-        (150.4, "unhealthy"),
-        (150.5, "very_unhealthy"),
-        (250.4, "very_unhealthy"),
-        (250.5, "hazardous"),
-        (500.0, "hazardous"),
-    ])
+    @pytest.mark.parametrize(
+        "pm25,expected",
+        [
+            (0.0, "good"),
+            (12.0, "good"),
+            (12.1, "moderate"),
+            (35.4, "moderate"),
+            (35.5, "unhealthy_sensitive"),
+            (55.4, "unhealthy_sensitive"),
+            (55.5, "unhealthy"),
+            (150.4, "unhealthy"),
+            (150.5, "very_unhealthy"),
+            (250.4, "very_unhealthy"),
+            (250.5, "hazardous"),
+            (500.0, "hazardous"),
+        ],
+    )
     def test_breakpoints(self, pm25, expected):
         assert _aqi_category(pm25) == expected
 

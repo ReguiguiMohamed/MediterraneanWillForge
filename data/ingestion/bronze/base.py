@@ -31,23 +31,24 @@ from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
 # ── Storage configuration ──────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class StorageConfig:
     """MinIO / S3-compatible connection parameters."""
 
-    endpoint:      str
-    access_key:    str
-    secret_key:    str
+    endpoint: str
+    access_key: str
+    secret_key: str
     bronze_bucket: str
 
     @property
     def options(self) -> dict[str, str]:
         """Delta Lake storage options for the S3A connector."""
         return {
-            "endpoint_url":              self.endpoint,
-            "aws_access_key_id":         self.access_key,
-            "aws_secret_access_key":     self.secret_key,
-            "aws_allow_http":            "true",
+            "endpoint_url": self.endpoint,
+            "aws_access_key_id": self.access_key,
+            "aws_secret_access_key": self.secret_key,
+            "aws_allow_http": "true",
             "aws_s3_allow_unsafe_rename": "true",
         }
 
@@ -63,6 +64,7 @@ class StorageConfig:
 
 # ── Base ingestor ──────────────────────────────────────────────────────────────
 
+
 class BronzeIngestor(ABC):
     """
     Template-method base for Bronze-layer ingestion.
@@ -72,9 +74,9 @@ class BronzeIngestor(ABC):
     """
 
     def __init__(self, storage: StorageConfig, pushgateway_url: str) -> None:
-        self.storage        = storage
+        self.storage = storage
         self.pushgateway_url = pushgateway_url
-        self._registry      = CollectorRegistry()
+        self._registry = CollectorRegistry()
         self._init_metrics()
 
     # ── Abstract interface ────────────────────────────────────────────────────
@@ -182,8 +184,8 @@ class BronzeIngestor(ABC):
             )
             return
 
-        t0  = time.monotonic()
-        df  = self.fetch(target_date)
+        t0 = time.monotonic()
+        df = self.fetch(target_date)
 
         if df.empty:
             logger.warning(

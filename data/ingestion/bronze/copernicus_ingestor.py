@@ -28,26 +28,27 @@ from .base import BronzeIngestor, StorageConfig
 # 12 cities covering the Western / Eastern Mediterranean basin and North Africa.
 # (station_id, latitude, longitude, display_name, country_iso2)
 MEDITERRANEAN_CITIES: list[tuple[str, float, float, str, str]] = [
-    ("tunis_tn",       36.82,  10.17, "Tunis",       "TN"),
-    ("algiers_dz",     36.74,   3.06, "Algiers",     "DZ"),
-    ("casablanca_ma",  33.57,  -7.59, "Casablanca",  "MA"),
-    ("tripoli_ly",     32.90,  13.18, "Tripoli",     "LY"),
-    ("cairo_eg",       30.06,  31.24, "Cairo",       "EG"),
-    ("alexandria_eg",  31.20,  29.92, "Alexandria",  "EG"),
-    ("beirut_lb",      33.89,  35.50, "Beirut",      "LB"),
-    ("athens_gr",      37.98,  23.73, "Athens",      "GR"),
-    ("istanbul_tr",    41.01,  28.95, "Istanbul",    "TR"),
-    ("rome_it",        41.90,  12.50, "Rome",        "IT"),
-    ("marseille_fr",   43.30,   5.37, "Marseille",   "FR"),
-    ("barcelona_es",   41.39,   2.17, "Barcelona",   "ES"),
+    ("tunis_tn", 36.82, 10.17, "Tunis", "TN"),
+    ("algiers_dz", 36.74, 3.06, "Algiers", "DZ"),
+    ("casablanca_ma", 33.57, -7.59, "Casablanca", "MA"),
+    ("tripoli_ly", 32.90, 13.18, "Tripoli", "LY"),
+    ("cairo_eg", 30.06, 31.24, "Cairo", "EG"),
+    ("alexandria_eg", 31.20, 29.92, "Alexandria", "EG"),
+    ("beirut_lb", 33.89, 35.50, "Beirut", "LB"),
+    ("athens_gr", 37.98, 23.73, "Athens", "GR"),
+    ("istanbul_tr", 41.01, 28.95, "Istanbul", "TR"),
+    ("rome_it", 41.90, 12.50, "Rome", "IT"),
+    ("marseille_fr", 43.30, 5.37, "Marseille", "FR"),
+    ("barcelona_es", 41.39, 2.17, "Barcelona", "ES"),
 ]
 
-_OPENMETEO_URL   = "https://air-quality-api.open-meteo.com/v1/air-quality"
-_HOURLY_VARS     = "pm2_5,pm10,nitrogen_dioxide,ozone"
+_OPENMETEO_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+_HOURLY_VARS = "pm2_5,pm10,nitrogen_dioxide,ozone"
 _REQUEST_TIMEOUT = 30  # seconds
 
 
 # ── Ingestor ───────────────────────────────────────────────────────────────────
+
 
 class CopernicusIngestor(BronzeIngestor):
     """
@@ -82,13 +83,15 @@ class CopernicusIngestor(BronzeIngestor):
             return pd.DataFrame()
 
         df = pd.DataFrame(rows)
-        df["date"]           = date_str
+        df["date"] = date_str
         df["partition_date"] = date_str
-        df["ingestion_ts"]   = pd.Timestamp.utcnow().isoformat()
-        df["source"]         = "openmeteo"
+        df["ingestion_ts"] = pd.Timestamp.utcnow().isoformat()
+        df["source"] = "openmeteo"
         return df
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=20))
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=20)
+    )
     def _fetch_city(
         self,
         station_id: str,
@@ -100,12 +103,12 @@ class CopernicusIngestor(BronzeIngestor):
     ) -> dict | None:
         """Fetch hourly data for a single city and return a daily-mean record."""
         params = {
-            "latitude":   lat,
-            "longitude":  lon,
-            "hourly":     _HOURLY_VARS,
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": _HOURLY_VARS,
             "start_date": date_str,
-            "end_date":   date_str,
-            "timezone":   "UTC",
+            "end_date": date_str,
+            "timezone": "UTC",
         }
         resp = requests.get(_OPENMETEO_URL, params=params, timeout=_REQUEST_TIMEOUT)
         resp.raise_for_status()
@@ -118,18 +121,18 @@ class CopernicusIngestor(BronzeIngestor):
 
         df_h = pd.DataFrame(hourly)
         means = {
-            "pm2_5":          _safe_mean(df_h, "pm2_5"),
-            "pm10":           _safe_mean(df_h, "pm10"),
+            "pm2_5": _safe_mean(df_h, "pm2_5"),
+            "pm10": _safe_mean(df_h, "pm10"),
             "nitrogen_dioxide": _safe_mean(df_h, "nitrogen_dioxide"),
-            "ozone":          _safe_mean(df_h, "ozone"),
+            "ozone": _safe_mean(df_h, "ozone"),
         }
 
         return {
-            "station_id":   station_id,
+            "station_id": station_id,
             "station_name": name,
             "country_code": country,
-            "latitude":     lat,
-            "longitude":    lon,
+            "latitude": lat,
+            "longitude": lon,
             **means,
         }
 
@@ -143,10 +146,11 @@ def _safe_mean(df: pd.DataFrame, col: str) -> float | None:
 
 # ── Module-level entry point ───────────────────────────────────────────────────
 
+
 def run(target_date: date | None = None) -> None:
     """Convenience wrapper; used by Docker CMD and integration tests."""
-    storage      = StorageConfig.from_env()
-    pushgateway  = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
+    storage = StorageConfig.from_env()
+    pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
     CopernicusIngestor(storage, pushgateway).run(target_date)
 
 

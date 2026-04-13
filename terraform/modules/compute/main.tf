@@ -2,8 +2,8 @@
 # Every metric is captured. Every anomaly is surfaced. No blind spots.
 
 locals {
-  prometheus_config_path = "${path.root}/../../monitoring/prometheus"
-  grafana_config_path    = "${path.root}/../../monitoring/grafana"
+  prometheus_config_path   = "${path.root}/../../monitoring/prometheus"
+  grafana_config_path      = "${path.root}/../../monitoring/grafana"
   alertmanager_config_path = "${path.root}/../../monitoring/alertmanager"
 }
 

@@ -34,29 +34,32 @@ from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
 # ── Storage config ─────────────────────────────────────────────────────────────
 
+
 def _storage_options() -> dict[str, str]:
     return {
-        "endpoint_url":               os.environ["MINIO_ENDPOINT"],
-        "aws_access_key_id":          os.environ["MINIO_ACCESS_KEY"],
-        "aws_secret_access_key":      os.environ["MINIO_SECRET_KEY"],
-        "aws_allow_http":             "true",
+        "endpoint_url": os.environ["MINIO_ENDPOINT"],
+        "aws_access_key_id": os.environ["MINIO_ACCESS_KEY"],
+        "aws_secret_access_key": os.environ["MINIO_SECRET_KEY"],
+        "aws_allow_http": "true",
         "aws_s3_allow_unsafe_rename": "true",
     }
 
 
 # ── Check result ───────────────────────────────────────────────────────────────
 
+
 @dataclass
 class CheckResult:
     check_name: str
-    layer:      str
-    table:      str
-    passed:     bool
-    severity:   str        # "warn" | "fail"
-    detail:     str = ""
+    layer: str
+    table: str
+    passed: bool
+    severity: str  # "warn" | "fail"
+    detail: str = ""
 
 
 # ── Individual check functions ─────────────────────────────────────────────────
+
 
 def check_row_count(
     df: pd.DataFrame,
@@ -84,14 +87,16 @@ def check_required_columns(
     results = []
     for col in required:
         present = col in df.columns
-        results.append(CheckResult(
-            check_name=f"column_exists_{col}",
-            layer=layer,
-            table=table,
-            passed=present,
-            severity="fail",
-            detail="present" if present else "MISSING",
-        ))
+        results.append(
+            CheckResult(
+                check_name=f"column_exists_{col}",
+                layer=layer,
+                table=table,
+                passed=present,
+                severity="fail",
+                detail="present" if present else "MISSING",
+            )
+        )
     return results
 
 
@@ -106,29 +111,37 @@ def check_null_rate(
     if col not in df.columns:
         return CheckResult(
             check_name=f"null_rate_{col}",
-            layer=layer, table=table,
-            passed=False, severity="fail",
+            layer=layer,
+            table=table,
+            passed=False,
+            severity="fail",
             detail=f"column '{col}' missing",
         )
     null_rate = df[col].isna().mean()
     if null_rate >= fail_threshold:
         return CheckResult(
             check_name=f"null_rate_{col}",
-            layer=layer, table=table,
-            passed=False, severity="fail",
+            layer=layer,
+            table=table,
+            passed=False,
+            severity="fail",
             detail=f"{null_rate:.1%} nulls (fail threshold {fail_threshold:.0%})",
         )
     if null_rate >= warn_threshold:
         return CheckResult(
             check_name=f"null_rate_{col}",
-            layer=layer, table=table,
-            passed=False, severity="warn",
+            layer=layer,
+            table=table,
+            passed=False,
+            severity="warn",
             detail=f"{null_rate:.1%} nulls (warn threshold {warn_threshold:.0%})",
         )
     return CheckResult(
         check_name=f"null_rate_{col}",
-        layer=layer, table=table,
-        passed=True, severity="warn",
+        layer=layer,
+        table=table,
+        passed=True,
+        severity="warn",
         detail=f"{null_rate:.1%} nulls — OK",
     )
 
@@ -145,16 +158,20 @@ def check_value_range(
     if col not in df.columns:
         return CheckResult(
             check_name=f"range_{col}",
-            layer=layer, table=table,
-            passed=False, severity="warn",
+            layer=layer,
+            table=table,
+            passed=False,
+            severity="warn",
             detail=f"column '{col}' missing",
         )
     series = pd.to_numeric(df[col], errors="coerce").dropna()
     if series.empty:
         return CheckResult(
             check_name=f"range_{col}",
-            layer=layer, table=table,
-            passed=True, severity="warn",
+            layer=layer,
+            table=table,
+            passed=True,
+            severity="warn",
             detail="no non-null values to check",
         )
     mask = pd.Series([True] * len(series), index=series.index)
@@ -166,8 +183,10 @@ def check_value_range(
     passed = compliance >= mostly
     return CheckResult(
         check_name=f"range_{col}",
-        layer=layer, table=table,
-        passed=passed, severity="warn",
+        layer=layer,
+        table=table,
+        passed=passed,
+        severity="warn",
         detail=f"{compliance:.1%} in [{min_val}, {max_val}] (required {mostly:.0%})",
     )
 
@@ -182,16 +201,20 @@ def check_valid_values(
     if col not in df.columns:
         return CheckResult(
             check_name=f"valid_values_{col}",
-            layer=layer, table=table,
-            passed=False, severity="warn",
+            layer=layer,
+            table=table,
+            passed=False,
+            severity="warn",
             detail=f"column '{col}' missing",
         )
     invalid = df[col].dropna()[~df[col].dropna().isin(valid_set)]
     passed = len(invalid) == 0
     return CheckResult(
         check_name=f"valid_values_{col}",
-        layer=layer, table=table,
-        passed=passed, severity="warn",
+        layer=layer,
+        table=table,
+        passed=passed,
+        severity="warn",
         detail=f"{len(invalid)} invalid values" if not passed else "all valid",
     )
 
@@ -206,21 +229,26 @@ def check_data_completeness_floor(
     if col not in df.columns:
         return CheckResult(
             check_name="data_completeness_floor",
-            layer=layer, table=table,
-            passed=True, severity="warn",
+            layer=layer,
+            table=table,
+            passed=True,
+            severity="warn",
             detail="column absent — skipped",
         )
     below = (df[col] < floor).sum()
     passed = below == 0
     return CheckResult(
         check_name="data_completeness_floor",
-        layer=layer, table=table,
-        passed=passed, severity="warn",
+        layer=layer,
+        table=table,
+        passed=passed,
+        severity="warn",
         detail=f"{below} rows below {floor:.0%} completeness",
     )
 
 
 # ── Table-level check suites ───────────────────────────────────────────────────
+
 
 def run_bronze_checks(
     df: pd.DataFrame,
@@ -231,19 +259,38 @@ def run_bronze_checks(
     results: list[CheckResult] = []
 
     results.append(check_row_count(df, layer, table))
-    results.extend(check_required_columns(
-        df, layer, table,
-        required=["station_id", "latitude", "longitude", "date", "partition_date", "source"],
-    ))
+    results.extend(
+        check_required_columns(
+            df,
+            layer,
+            table,
+            required=[
+                "station_id",
+                "latitude",
+                "longitude",
+                "date",
+                "partition_date",
+                "source",
+            ],
+        )
+    )
     for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
-        results.append(check_null_rate(df, layer, table, col,
-                                       warn_threshold=0.40, fail_threshold=0.80))
+        results.append(
+            check_null_rate(
+                df, layer, table, col, warn_threshold=0.40, fail_threshold=0.80
+            )
+        )
         results.append(check_value_range(df, layer, table, col, min_val=0))
 
-    results.append(check_valid_values(
-        df, layer, table, "source",
-        valid_set={"openmeteo", "openaq"},
-    ))
+    results.append(
+        check_valid_values(
+            df,
+            layer,
+            table,
+            "source",
+            valid_set={"openmeteo", "openaq"},
+        )
+    )
     return results
 
 
@@ -253,36 +300,70 @@ def run_silver_checks(df: pd.DataFrame) -> list[CheckResult]:
     results: list[CheckResult] = []
 
     results.append(check_row_count(df, layer, table))
-    results.extend(check_required_columns(
-        df, layer, table,
-        required=[
-            "station_id", "country_code", "latitude", "longitude", "date",
-            "pm2_5", "pm10", "nitrogen_dioxide", "ozone",
-            "aqi_category", "who_pm25_exceed", "data_completeness",
-            "source", "silver_ts", "partition_date",
-        ],
-    ))
+    results.extend(
+        check_required_columns(
+            df,
+            layer,
+            table,
+            required=[
+                "station_id",
+                "country_code",
+                "latitude",
+                "longitude",
+                "date",
+                "pm2_5",
+                "pm10",
+                "nitrogen_dioxide",
+                "ozone",
+                "aqi_category",
+                "who_pm25_exceed",
+                "data_completeness",
+                "source",
+                "silver_ts",
+                "partition_date",
+            ],
+        )
+    )
     for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
-        results.append(check_null_rate(df, layer, table, col,
-                                       warn_threshold=0.30, fail_threshold=0.70))
+        results.append(
+            check_null_rate(
+                df, layer, table, col, warn_threshold=0.30, fail_threshold=0.70
+            )
+        )
         results.append(check_value_range(df, layer, table, col, min_val=0))
 
-    results.append(check_valid_values(
-        df, layer, table, "aqi_category",
-        valid_set={
-            "good", "moderate", "unhealthy_sensitive",
-            "unhealthy", "very_unhealthy", "hazardous", "unknown",
-        },
-    ))
-    results.append(check_valid_values(
-        df, layer, table, "source",
-        valid_set={"openmeteo", "openaq"},
-    ))
+    results.append(
+        check_valid_values(
+            df,
+            layer,
+            table,
+            "aqi_category",
+            valid_set={
+                "good",
+                "moderate",
+                "unhealthy_sensitive",
+                "unhealthy",
+                "very_unhealthy",
+                "hazardous",
+                "unknown",
+            },
+        )
+    )
+    results.append(
+        check_valid_values(
+            df,
+            layer,
+            table,
+            "source",
+            valid_set={"openmeteo", "openaq"},
+        )
+    )
     results.append(check_data_completeness_floor(df, layer, table))
     return results
 
 
 # ── Table loader ───────────────────────────────────────────────────────────────
+
 
 def load_recent_partition(
     table_path: str,
@@ -296,9 +377,7 @@ def load_recent_partition(
     cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
     try:
         dt = DeltaTable(table_path, storage_options=storage_options)
-        df = dt.to_pandas(
-            filters=[("partition_date", ">=", cutoff)]
-        )
+        df = dt.to_pandas(filters=[("partition_date", ">=", cutoff)])
         return df
     except Exception as exc:
         logger.warning(f"Could not load {table_path}: {exc}")
@@ -307,11 +386,12 @@ def load_recent_partition(
 
 # ── Metrics ────────────────────────────────────────────────────────────────────
 
+
 def _push_results(
     results: list[CheckResult],
     pushgateway_url: str,
 ) -> None:
-    reg         = CollectorRegistry()
+    reg = CollectorRegistry()
     fail_counter = Counter(
         "pipeline_quality_check_failures_total",
         "Number of data quality gate failures",
@@ -344,12 +424,13 @@ def _push_results(
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+
 def run() -> int:
     storage_opts = _storage_options()
     bronze_bucket = os.environ.get("MINIO_BUCKET_BRONZE", "bronze")
     silver_bucket = os.environ.get("MINIO_BUCKET_SILVER", "silver")
-    pushgateway   = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
-    lookback      = int(os.environ.get("QUALITY_LOOKBACK_DAYS", "1"))
+    pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
+    lookback = int(os.environ.get("QUALITY_LOOKBACK_DAYS", "1"))
 
     logger.info(f"Quality checks starting — lookback={lookback}d")
     t_start = time.monotonic()
@@ -387,7 +468,7 @@ def run() -> int:
 
     failures = [r for r in all_results if not r.passed and r.severity == "fail"]
     warnings = [r for r in all_results if not r.passed and r.severity == "warn"]
-    passed   = [r for r in all_results if r.passed]
+    passed = [r for r in all_results if r.passed]
 
     elapsed = time.monotonic() - t_start
     logger.info(

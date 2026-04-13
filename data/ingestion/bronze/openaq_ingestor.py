@@ -29,15 +29,27 @@ from .base import BronzeIngestor, StorageConfig
 # ── Target countries ───────────────────────────────────────────────────────────
 # North African coastal + Eastern Mediterranean nations with measurable station
 # coverage in the OpenAQ network.
-TARGET_COUNTRIES: list[str] = ["TN", "DZ", "MA", "LY", "EG", "TR", "GR", "ES", "IT", "LB"]
+TARGET_COUNTRIES: list[str] = [
+    "TN",
+    "DZ",
+    "MA",
+    "LY",
+    "EG",
+    "TR",
+    "GR",
+    "ES",
+    "IT",
+    "LB",
+]
 
-_OPENAQ_BASE     = "https://api.openaq.org/v2"
-_PARAMETERS      = ["pm25", "pm10", "no2", "o3"]
-_PAGE_LIMIT      = 1000   # max records per OpenAQ page
-_REQUEST_TIMEOUT = 45     # seconds
+_OPENAQ_BASE = "https://api.openaq.org/v2"
+_PARAMETERS = ["pm25", "pm10", "no2", "o3"]
+_PAGE_LIMIT = 1000  # max records per OpenAQ page
+_REQUEST_TIMEOUT = 45  # seconds
 
 
 # ── Ingestor ───────────────────────────────────────────────────────────────────
+
 
 class OpenAQIngestor(BronzeIngestor):
     """
@@ -56,7 +68,7 @@ class OpenAQIngestor(BronzeIngestor):
 
     def fetch(self, target_date: date) -> pd.DataFrame:
         date_from = f"{target_date.isoformat()}T00:00:00Z"
-        date_to   = f"{target_date.isoformat()}T23:59:59Z"
+        date_to = f"{target_date.isoformat()}T23:59:59Z"
 
         all_results: list[dict] = []
         for country in TARGET_COUNTRIES:
@@ -72,7 +84,9 @@ class OpenAQIngestor(BronzeIngestor):
 
         return self._build_dataframe(all_results, target_date)
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=30)
+    )
     def _fetch_measurements(
         self,
         country: str,
@@ -82,12 +96,12 @@ class OpenAQIngestor(BronzeIngestor):
     ) -> list[dict]:
         """Fetch one page of measurements for a single country + parameter pair."""
         params = {
-            "country":    country,
-            "parameter":  parameter,
-            "date_from":  date_from,
-            "date_to":    date_to,
-            "limit":      _PAGE_LIMIT,
-            "page":       1,
+            "country": country,
+            "parameter": parameter,
+            "date_from": date_from,
+            "date_to": date_to,
+            "limit": _PAGE_LIMIT,
+            "page": 1,
         }
         headers = {"Accept": "application/json"}
         try:
@@ -103,10 +117,14 @@ class OpenAQIngestor(BronzeIngestor):
         except requests.HTTPError as exc:
             # 429 = rate limited; tenacity will retry
             if exc.response is not None and exc.response.status_code == 429:
-                logger.warning(f"[openaq] Rate-limited on {country}/{parameter} — retrying.")
+                logger.warning(
+                    f"[openaq] Rate-limited on {country}/{parameter} — retrying."
+                )
                 time.sleep(2)
                 raise
-            logger.warning(f"[openaq] HTTP {exc.response.status_code} for {country}/{parameter}: {exc}")
+            logger.warning(
+                f"[openaq] HTTP {exc.response.status_code} for {country}/{parameter}: {exc}"
+            )
             return []
         except Exception as exc:
             logger.warning(f"[openaq] Request failed for {country}/{parameter}: {exc}")
@@ -121,17 +139,19 @@ class OpenAQIngestor(BronzeIngestor):
         rows: list[dict] = []
         for r in results:
             coords = r.get("coordinates") or {}
-            rows.append({
-                "station_id":   r.get("locationId"),
-                "station_name": r.get("location"),
-                "city":         r.get("city"),
-                "country_code": r.get("country"),
-                "latitude":     coords.get("latitude"),
-                "longitude":    coords.get("longitude"),
-                "parameter":    r.get("parameter"),
-                "value":        r.get("value"),
-                "unit":         r.get("unit"),
-            })
+            rows.append(
+                {
+                    "station_id": r.get("locationId"),
+                    "station_name": r.get("location"),
+                    "city": r.get("city"),
+                    "country_code": r.get("country"),
+                    "latitude": coords.get("latitude"),
+                    "longitude": coords.get("longitude"),
+                    "parameter": r.get("parameter"),
+                    "value": r.get("value"),
+                    "unit": r.get("unit"),
+                }
+            )
 
         df_long = pd.DataFrame(rows)
 
@@ -145,9 +165,16 @@ class OpenAQIngestor(BronzeIngestor):
 
         # Aggregate to daily mean per station × parameter
         agg = (
-            df_long
-            .groupby(
-                ["station_id", "station_name", "city", "country_code", "latitude", "longitude", "parameter"],
+            df_long.groupby(
+                [
+                    "station_id",
+                    "station_name",
+                    "city",
+                    "country_code",
+                    "latitude",
+                    "longitude",
+                    "parameter",
+                ],
                 dropna=False,
             )["value"]
             .mean()
@@ -157,7 +184,14 @@ class OpenAQIngestor(BronzeIngestor):
 
         # Pivot: one column per pollutant
         pivot = agg.pivot_table(
-            index=["station_id", "station_name", "city", "country_code", "latitude", "longitude"],
+            index=[
+                "station_id",
+                "station_name",
+                "city",
+                "country_code",
+                "latitude",
+                "longitude",
+            ],
             columns="parameter",
             values="value",
             aggfunc="first",
@@ -165,11 +199,13 @@ class OpenAQIngestor(BronzeIngestor):
 
         # Normalise column names (pm25 → pm2_5 for consistency with Open-Meteo)
         pivot.columns.name = None
-        pivot = pivot.rename(columns={
-            "pm25": "pm2_5",
-            "no2":  "nitrogen_dioxide",
-            "o3":   "ozone",
-        })
+        pivot = pivot.rename(
+            columns={
+                "pm25": "pm2_5",
+                "no2": "nitrogen_dioxide",
+                "o3": "ozone",
+            }
+        )
 
         # Guarantee all pollutant columns exist even when no data was returned
         for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
@@ -177,10 +213,10 @@ class OpenAQIngestor(BronzeIngestor):
                 pivot[col] = None
 
         date_str = target_date.isoformat()
-        pivot["date"]           = date_str
+        pivot["date"] = date_str
         pivot["partition_date"] = date_str
-        pivot["ingestion_ts"]   = pd.Timestamp.now(tz=timezone.utc).isoformat()
-        pivot["source"]         = "openaq"
+        pivot["ingestion_ts"] = pd.Timestamp.now(tz=timezone.utc).isoformat()
+        pivot["source"] = "openaq"
 
         # station_id must be a string for consistent Delta Lake schema
         pivot["station_id"] = pivot["station_id"].astype(str)
@@ -190,9 +226,10 @@ class OpenAQIngestor(BronzeIngestor):
 
 # ── Module-level entry point ───────────────────────────────────────────────────
 
+
 def run(target_date: date | None = None) -> None:
     """Convenience wrapper; used by Docker CMD and integration tests."""
-    storage     = StorageConfig.from_env()
+    storage = StorageConfig.from_env()
     pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
     OpenAQIngestor(storage, pushgateway).run(target_date)
 

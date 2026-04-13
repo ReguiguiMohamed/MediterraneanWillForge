@@ -3,8 +3,8 @@
 # Local development defaults. Safe to commit — all values are well-known
 # dev credentials with no production exposure.
 
-environment            = "local"
-project_name           = "med-ops-fortress"
+environment  = "local"
+project_name = "med-ops-fortress"
 
 minio_access_key       = "minioadmin"
 minio_secret_key       = "minioadmin"

@@ -33,17 +33,19 @@ from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
+
 def _storage_options() -> dict[str, str]:
     return {
-        "endpoint_url":               os.environ["MINIO_ENDPOINT"],
-        "aws_access_key_id":          os.environ["MINIO_ACCESS_KEY"],
-        "aws_secret_access_key":      os.environ["MINIO_SECRET_KEY"],
-        "aws_allow_http":             "true",
+        "endpoint_url": os.environ["MINIO_ENDPOINT"],
+        "aws_access_key_id": os.environ["MINIO_ACCESS_KEY"],
+        "aws_secret_access_key": os.environ["MINIO_SECRET_KEY"],
+        "aws_allow_http": "true",
         "aws_s3_allow_unsafe_rename": "true",
     }
 
 
 # ── Mart builders ──────────────────────────────────────────────────────────────
+
 
 def build_daily_country_summary(silver_df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -61,35 +63,35 @@ def build_daily_country_summary(silver_df: pd.DataFrame) -> pd.DataFrame:
         # Fill blanks from station_id where possible (e.g. "tunis_tn" → "TN")
         mask = silver_df["country_code"].isna() & silver_df["station_id"].notna()
         silver_df.loc[mask, "country_code"] = (
-            silver_df.loc[mask, "station_id"]
-            .str.split("_")
-            .str[-1]
-            .str.upper()
+            silver_df.loc[mask, "station_id"].str.split("_").str[-1].str.upper()
         )
     else:
         silver_df["country_code"] = None
 
     summary = (
-        silver_df
-        .groupby(group_cols, dropna=False)
+        silver_df.groupby(group_cols, dropna=False)
         .agg(
-            mean_pm2_5          =("pm2_5",            "mean"),
-            max_pm2_5           =("pm2_5",            "max"),
-            mean_pm10           =("pm10",             "mean"),
-            mean_no2            =("nitrogen_dioxide", "mean"),
-            mean_o3             =("ozone",            "mean"),
-            station_count       =("station_id",       "nunique"),
-            who_pm25_exceed_pct =("who_pm25_exceed",  "mean"),
-            who_pm10_exceed_pct =("who_pm10_exceed",  "mean"),
-            who_no2_exceed_pct  =("who_no2_exceed",   "mean"),
-            who_o3_exceed_pct   =("who_o3_exceed",    "mean"),
+            mean_pm2_5=("pm2_5", "mean"),
+            max_pm2_5=("pm2_5", "max"),
+            mean_pm10=("pm10", "mean"),
+            mean_no2=("nitrogen_dioxide", "mean"),
+            mean_o3=("ozone", "mean"),
+            station_count=("station_id", "nunique"),
+            who_pm25_exceed_pct=("who_pm25_exceed", "mean"),
+            who_pm10_exceed_pct=("who_pm10_exceed", "mean"),
+            who_no2_exceed_pct=("who_no2_exceed", "mean"),
+            who_o3_exceed_pct=("who_o3_exceed", "mean"),
         )
         .reset_index()
     )
 
     # Convert mean exceedance fractions → percentages
-    for col in ("who_pm25_exceed_pct", "who_pm10_exceed_pct",
-                "who_no2_exceed_pct", "who_o3_exceed_pct"):
+    for col in (
+        "who_pm25_exceed_pct",
+        "who_pm10_exceed_pct",
+        "who_no2_exceed_pct",
+        "who_o3_exceed_pct",
+    ):
         summary[col] = (summary[col] * 100).round(1)
 
     for col in ("mean_pm2_5", "max_pm2_5", "mean_pm10", "mean_no2", "mean_o3"):
@@ -108,11 +110,11 @@ def build_wildfire_risk_index(silver_df: pd.DataFrame) -> pd.DataFrame:
     """
     df = silver_df.copy()
 
-    o3_ref   = 180.0
+    o3_ref = 180.0
     pm25_ref = 150.0
 
-    df["o3_norm"]   = (df["ozone"].fillna(0)  / o3_ref).clip(0, 1)
-    df["pm25_norm"] = (df["pm2_5"].fillna(0)  / pm25_ref).clip(0, 1)
+    df["o3_norm"] = (df["ozone"].fillna(0) / o3_ref).clip(0, 1)
+    df["pm25_norm"] = (df["pm2_5"].fillna(0) / pm25_ref).clip(0, 1)
     df["risk_index"] = ((df["o3_norm"] * 0.6 + df["pm25_norm"] * 0.4) * 100).round(1)
 
     df["risk_level"] = pd.cut(
@@ -122,9 +124,17 @@ def build_wildfire_risk_index(silver_df: pd.DataFrame) -> pd.DataFrame:
     ).astype(str)
 
     keep = [
-        "partition_date", "source", "station_id", "station_name",
-        "country_code", "latitude", "longitude",
-        "pm2_5", "ozone", "risk_index", "risk_level",
+        "partition_date",
+        "source",
+        "station_id",
+        "station_name",
+        "country_code",
+        "latitude",
+        "longitude",
+        "pm2_5",
+        "ozone",
+        "risk_index",
+        "risk_level",
     ]
     # Only keep columns that actually exist
     keep = [c for c in keep if c in df.columns]
@@ -135,16 +145,26 @@ def build_wildfire_risk_index(silver_df: pd.DataFrame) -> pd.DataFrame:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+
 def run() -> None:
     storage_opts = _storage_options()
     silver_bucket = os.environ.get("MINIO_BUCKET_SILVER", "silver")
-    gold_bucket   = os.environ.get("MINIO_BUCKET_GOLD",   "gold")
-    pushgateway   = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
+    gold_bucket = os.environ.get("MINIO_BUCKET_GOLD", "gold")
+    pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
 
-    reg        = CollectorRegistry()
-    rows_gauge = Gauge("pipeline_ingested_rows",                   "Rows written",       ["layer", "source"], registry=reg)
-    fresh_gauge= Gauge("pipeline_last_successful_run_timestamp",   "Last run timestamp", ["layer"],           registry=reg)
-    dur_gauge  = Gauge("pipeline_duration_seconds",                "Stage duration",     ["stage"],           registry=reg)
+    reg = CollectorRegistry()
+    rows_gauge = Gauge(
+        "pipeline_ingested_rows", "Rows written", ["layer", "source"], registry=reg
+    )
+    fresh_gauge = Gauge(
+        "pipeline_last_successful_run_timestamp",
+        "Last run timestamp",
+        ["layer"],
+        registry=reg,
+    )
+    dur_gauge = Gauge(
+        "pipeline_duration_seconds", "Stage duration", ["stage"], registry=reg
+    )
 
     logger.info("Gold mart build starting.")
     t_start = time.monotonic()
@@ -161,7 +181,9 @@ def run() -> None:
         logger.warning("Silver layer is empty — nothing to mart.")
         return
 
-    logger.info(f"Silver snapshot: {len(silver_df)} rows across {silver_df['partition_date'].nunique()} dates.")
+    logger.info(
+        f"Silver snapshot: {len(silver_df)} rows across {silver_df['partition_date'].nunique()} dates."
+    )
 
     # ── daily_country_summary ─────────────────────────────────────────────────
     summary = build_daily_country_summary(silver_df)
@@ -186,7 +208,7 @@ def run() -> None:
     logger.info(f"Gold wildfire_risk_index: {len(risk)} rows written.")
 
     total_rows = len(summary) + len(risk)
-    elapsed    = time.monotonic() - t_start
+    elapsed = time.monotonic() - t_start
 
     rows_gauge.labels(layer="gold", source="all").set(total_rows)
     fresh_gauge.labels(layer="gold").set(time.time())

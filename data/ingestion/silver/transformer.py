@@ -51,18 +51,18 @@ from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
 # ── WHO 2021 24-hour guideline thresholds (µg/m³) ─────────────────────────────
 WHO = {
-    "pm2_5":          15.0,
-    "pm10":           45.0,
+    "pm2_5": 15.0,
+    "pm10": 45.0,
     "nitrogen_dioxide": 25.0,
-    "ozone":          100.0,
+    "ozone": 100.0,
 }
 
 # Physical upper bounds for clip — values beyond these are instrument errors
 _CLIP_MAX = {
-    "pm2_5":          1_000.0,
-    "pm10":           2_000.0,
+    "pm2_5": 1_000.0,
+    "pm10": 2_000.0,
     "nitrogen_dioxide": 500.0,
-    "ozone":          500.0,
+    "ozone": 500.0,
 }
 
 _POLLUTANTS = list(WHO.keys())
@@ -73,6 +73,7 @@ _MIN_COMPLETENESS = 0.20
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class SilverConfig:
     bronze_bucket: str
@@ -82,24 +83,27 @@ class SilverConfig:
 
     @classmethod
     def from_env(cls) -> SilverConfig:
-        endpoint   = os.environ["MINIO_ENDPOINT"]
+        endpoint = os.environ["MINIO_ENDPOINT"]
         access_key = os.environ["MINIO_ACCESS_KEY"]
         secret_key = os.environ["MINIO_SECRET_KEY"]
         return cls(
             bronze_bucket=os.environ.get("MINIO_BUCKET_BRONZE", "bronze"),
             silver_bucket=os.environ.get("MINIO_BUCKET_SILVER", "silver"),
-            pushgateway_url=os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091"),
+            pushgateway_url=os.environ.get(
+                "PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091"
+            ),
             storage_options={
-                "endpoint_url":               endpoint,
-                "aws_access_key_id":          access_key,
-                "aws_secret_access_key":      secret_key,
-                "aws_allow_http":             "true",
+                "endpoint_url": endpoint,
+                "aws_access_key_id": access_key,
+                "aws_secret_access_key": secret_key,
+                "aws_allow_http": "true",
                 "aws_s3_allow_unsafe_rename": "true",
             },
         )
 
 
 # ── Pure cleaning / enrichment functions ──────────────────────────────────────
+
 
 def clean(df: pd.DataFrame, source: str) -> pd.DataFrame:
     """
@@ -113,12 +117,14 @@ def clean(df: pd.DataFrame, source: str) -> pd.DataFrame:
     # ── Numeric enforcement + physical clip ───────────────────────────────────
     for col in _POLLUTANTS:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").clip(lower=0, upper=_CLIP_MAX[col])
+            df[col] = pd.to_numeric(df[col], errors="coerce").clip(
+                lower=0, upper=_CLIP_MAX[col]
+            )
         else:
             df[col] = np.nan
 
     # ── Coordinate enforcement ────────────────────────────────────────────────
-    df["latitude"]  = pd.to_numeric(df.get("latitude"),  errors="coerce")
+    df["latitude"] = pd.to_numeric(df.get("latitude"), errors="coerce")
     df["longitude"] = pd.to_numeric(df.get("longitude"), errors="coerce")
 
     # ── Normalise date to string YYYY-MM-DD ───────────────────────────────────
@@ -153,10 +159,10 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     df["aqi_category"] = df["pm2_5"].apply(_aqi_category)
 
     # ── WHO 2021 exceedance flags ─────────────────────────────────────────────
-    df["who_pm25_exceed"] = _exceed_flag(df, "pm2_5",          WHO["pm2_5"])
-    df["who_pm10_exceed"] = _exceed_flag(df, "pm10",           WHO["pm10"])
-    df["who_no2_exceed"]  = _exceed_flag(df, "nitrogen_dioxide", WHO["nitrogen_dioxide"])
-    df["who_o3_exceed"]   = _exceed_flag(df, "ozone",          WHO["ozone"])
+    df["who_pm25_exceed"] = _exceed_flag(df, "pm2_5", WHO["pm2_5"])
+    df["who_pm10_exceed"] = _exceed_flag(df, "pm10", WHO["pm10"])
+    df["who_no2_exceed"] = _exceed_flag(df, "nitrogen_dioxide", WHO["nitrogen_dioxide"])
+    df["who_o3_exceed"] = _exceed_flag(df, "ozone", WHO["ozone"])
 
     # ── Write timestamp ───────────────────────────────────────────────────────
     df["silver_ts"] = pd.Timestamp.now(tz=timezone.utc).isoformat()
@@ -187,6 +193,7 @@ def _exceed_flag(df: pd.DataFrame, col: str, threshold: float) -> pd.Series:
 
 # ── Incremental partition management ──────────────────────────────────────────
 
+
 def _unprocessed_partitions(
     bronze_path: str,
     silver_path: str,
@@ -197,7 +204,7 @@ def _unprocessed_partitions(
     Return Bronze partition dates not yet present in Silver for this source.
     """
     try:
-        bronze_dt    = DeltaTable(bronze_path, storage_options=storage_options)
+        bronze_dt = DeltaTable(bronze_path, storage_options=storage_options)
         bronze_dates = set(
             bronze_dt.to_pandas(columns=["partition_date"])["partition_date"].unique()
         )
@@ -205,8 +212,8 @@ def _unprocessed_partitions(
         return []
 
     try:
-        silver_dt    = DeltaTable(silver_path, storage_options=storage_options)
-        silver_df    = silver_dt.to_pandas(
+        silver_dt = DeltaTable(silver_path, storage_options=storage_options)
+        silver_df = silver_dt.to_pandas(
             columns=["partition_date", "source"],
             filters=[("source", "=", source)],
         )
@@ -219,20 +226,38 @@ def _unprocessed_partitions(
 
 # ── Metrics ────────────────────────────────────────────────────────────────────
 
+
 def _build_metrics() -> tuple[CollectorRegistry, Gauge, Gauge, Gauge, Counter]:
     reg = CollectorRegistry()
-    rows  = Gauge("pipeline_ingested_rows",
-                  "Rows written in this run", ["layer", "source"], registry=reg)
-    fresh = Gauge("pipeline_last_successful_run_timestamp",
-                  "Unix timestamp of last successful run", ["layer"], registry=reg)
-    dur   = Gauge("pipeline_duration_seconds",
-                  "Wall-clock seconds per pipeline stage", ["stage"], registry=reg)
-    qual  = Counter("pipeline_quality_check_failures_total",
-                    "Data quality gate failures", ["check_name", "layer"], registry=reg)
+    rows = Gauge(
+        "pipeline_ingested_rows",
+        "Rows written in this run",
+        ["layer", "source"],
+        registry=reg,
+    )
+    fresh = Gauge(
+        "pipeline_last_successful_run_timestamp",
+        "Unix timestamp of last successful run",
+        ["layer"],
+        registry=reg,
+    )
+    dur = Gauge(
+        "pipeline_duration_seconds",
+        "Wall-clock seconds per pipeline stage",
+        ["stage"],
+        registry=reg,
+    )
+    qual = Counter(
+        "pipeline_quality_check_failures_total",
+        "Data quality gate failures",
+        ["check_name", "layer"],
+        registry=reg,
+    )
     return reg, rows, fresh, dur, qual
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
+
 
 def run() -> None:
     cfg = SilverConfig.from_env()
@@ -242,11 +267,11 @@ def run() -> None:
 
     sources = [
         ("openmeteo", f"s3://{cfg.bronze_bucket}/openmeteo/air_quality"),
-        ("openaq",    f"s3://{cfg.bronze_bucket}/openaq/air_quality"),
+        ("openaq", f"s3://{cfg.bronze_bucket}/openaq/air_quality"),
     ]
 
     logger.info("Silver transformation starting.")
-    t_start    = time.monotonic()
+    t_start = time.monotonic()
     total_rows = 0
 
     for source, bronze_path in sources:
@@ -258,12 +283,14 @@ def run() -> None:
             logger.info(f"[{source}] Silver up to date — nothing to process.")
             continue
 
-        logger.info(f"[{source}] Processing {len(partitions)} new partition(s): {partitions}")
+        logger.info(
+            f"[{source}] Processing {len(partitions)} new partition(s): {partitions}"
+        )
 
         for partition in partitions:
             try:
                 bronze_dt = DeltaTable(bronze_path, storage_options=cfg.storage_options)
-                raw_df    = bronze_dt.to_pandas(
+                raw_df = bronze_dt.to_pandas(
                     filters=[("partition_date", "=", partition)]
                 )
 
@@ -271,7 +298,9 @@ def run() -> None:
                 enriched = enrich(cleaned)
 
                 if enriched.empty:
-                    logger.warning(f"[{source}] Partition {partition} — 0 rows after cleaning, skipping write.")
+                    logger.warning(
+                        f"[{source}] Partition {partition} — 0 rows after cleaning, skipping write."
+                    )
                     continue
 
                 write_deltalake(
@@ -283,7 +312,9 @@ def run() -> None:
                     schema_mode="merge",
                 )
                 total_rows += len(enriched)
-                logger.info(f"[{source}] Partition {partition}: {len(enriched)} rows → Silver.")
+                logger.info(
+                    f"[{source}] Partition {partition}: {len(enriched)} rows → Silver."
+                )
 
             except Exception as exc:
                 logger.error(f"[{source}] Partition {partition} failed: {exc}")
@@ -294,9 +325,7 @@ def run() -> None:
     fresh_gauge.labels(layer="silver").set(time.time())
     dur_gauge.labels(stage="silver_transform").set(elapsed)
 
-    push_to_gateway(
-        cfg.pushgateway_url, job="med_ops_silver_transform", registry=reg
-    )
+    push_to_gateway(cfg.pushgateway_url, job="med_ops_silver_transform", registry=reg)
     logger.success(
         f"Silver transformation complete — {total_rows} rows across all sources, {elapsed:.1f}s"
     )
