@@ -19,7 +19,6 @@ from data.quality.run_checks import (
     run_silver_checks,
 )
 
-
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
 

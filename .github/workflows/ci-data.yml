@@ -37,7 +37,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r docker/ingestion/requirements.txt
-          pip install ruff black pytest pytest-cov
+          pip install "ruff==0.15.10" "black==26.3.1" pytest pytest-cov
 
       - name: Lint with ruff
         run: ruff check data/ tests/

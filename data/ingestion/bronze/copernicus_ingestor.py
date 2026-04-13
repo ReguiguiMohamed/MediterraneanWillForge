@@ -23,7 +23,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .base import BronzeIngestor, StorageConfig
 
-
 # ── City grid ──────────────────────────────────────────────────────────────────
 # 12 cities covering the Western / Eastern Mediterranean basin and North Africa.
 # (station_id, latitude, longitude, display_name, country_iso2)

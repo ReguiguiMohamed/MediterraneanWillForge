@@ -17,7 +17,6 @@ from data.ingestion.silver.transformer import (
     enrich,
 )
 
-
 # ── Shared fixtures ────────────────────────────────────────────────────────────
 
 

@@ -9,7 +9,6 @@ import pytest
 import requests
 from datetime import date
 
-
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
 
 _STORAGE_OPTS = {

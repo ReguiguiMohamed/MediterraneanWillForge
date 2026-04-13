@@ -25,7 +25,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .base import BronzeIngestor, StorageConfig
 
-
 # ── Target countries ───────────────────────────────────────────────────────────
 # North African coastal + Eastern Mediterranean nations with measurable station
 # coverage in the OpenAQ network.

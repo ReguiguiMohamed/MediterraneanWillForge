@@ -48,7 +48,6 @@ from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
-
 # ── WHO 2021 24-hour guideline thresholds (µg/m³) ─────────────────────────────
 WHO = {
     "pm2_5": 15.0,

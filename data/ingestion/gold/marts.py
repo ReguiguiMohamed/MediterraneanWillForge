@@ -30,7 +30,6 @@ from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
-
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 
