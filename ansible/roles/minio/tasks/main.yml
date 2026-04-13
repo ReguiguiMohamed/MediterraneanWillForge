@@ -17,10 +17,12 @@
 - name: Deploy MinIO via Docker
   community.docker.docker_container:
     name: minio
-    image: quay.io/minio/minio:latest
+    image: "{{ docker_minio_image }}"
     state: started
     restart_policy: unless-stopped
     command: server /data --console-address ":9001"
+    networks:
+      - name: med-ops-net
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -41,5 +43,5 @@
     status_code: 200
   register: minio_health
   until: minio_health.status == 200
-  retries: 10
+  retries: 12
   delay: 5

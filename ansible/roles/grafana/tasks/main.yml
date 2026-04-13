@@ -9,6 +9,7 @@
   loop:
     - /etc/grafana/provisioning/datasources
     - /etc/grafana/provisioning/dashboards
+    - /var/lib/grafana/dashboards
 
 - name: Copy Grafana datasource provisioning
   ansible.builtin.copy:
@@ -31,13 +32,15 @@
 - name: Deploy Grafana container
   community.docker.docker_container:
     name: grafana
-    image: grafana/grafana-oss:10.4.2
+    image: "{{ docker_grafana_image }}"
     state: started
     restart_policy: unless-stopped
+    networks:
+      - name: med-ops-net
     ports:
       - "3000:3000"
     env:
-      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_USER: "{{ grafana_admin_user | default('admin') }}"
       GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password | default('fortress') }}"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/pipeline_health.json

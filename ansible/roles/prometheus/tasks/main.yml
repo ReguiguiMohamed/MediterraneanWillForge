@@ -1,11 +1,14 @@
 ---
-# prometheus/tasks/main.yml — Deploy Prometheus + Pushgateway
+# prometheus/tasks/main.yml — Deploy Prometheus + Pushgateway + node_exporter
 
 - name: Create Prometheus config directory
   ansible.builtin.file:
-    path: /etc/prometheus
+    path: "{{ item }}"
     state: directory
     mode: "0755"
+  loop:
+    - /etc/prometheus
+    - /etc/prometheus/rules
 
 - name: Template Prometheus configuration
   ansible.builtin.template:
@@ -24,9 +27,11 @@
 - name: Deploy Prometheus container
   community.docker.docker_container:
     name: prometheus
-    image: prom/prometheus:v2.51.0
+    image: "{{ docker_prometheus_image }}"
     state: started
     restart_policy: unless-stopped
+    networks:
+      - name: med-ops-net
     ports:
       - "9090:9090"
     volumes:
@@ -35,15 +40,30 @@
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.time={{ prometheus_retention_days }}d"
       - "--web.enable-lifecycle"
       - "--web.enable-admin-api"
 
 - name: Deploy Pushgateway container
   community.docker.docker_container:
     name: pushgateway
-    image: prom/pushgateway:v1.8.0
+    image: "{{ docker_pushgateway_image }}"
     state: started
     restart_policy: unless-stopped
+    networks:
+      - name: med-ops-net
     ports:
       - "9091:9091"
+
+- name: Deploy node_exporter container
+  community.docker.docker_container:
+    name: node_exporter
+    image: "{{ docker_node_exporter_image }}"
+    state: started
+    restart_policy: unless-stopped
+    network_mode: host
+    pid_mode: host
+    volumes:
+      - /:/host:ro,rslave
+    command:
+      - "--path.rootfs=/host"

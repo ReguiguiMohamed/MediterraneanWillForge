@@ -1,27 +1,27 @@
 ---
 # common/handlers/main.yml
-# Shared restart handlers. Roles notify these by name.
+# Shared restart handlers — container names must match those in the deploy tasks.
 
 - name: Restart Prometheus
   community.docker.docker_container:
-    name: "{{ project_name }}-prometheus"
+    name: prometheus
     state: started
     restart: true
 
 - name: Restart Alertmanager
   community.docker.docker_container:
-    name: "{{ project_name }}-alertmanager"
+    name: alertmanager
     state: started
     restart: true
 
 - name: Restart Grafana
   community.docker.docker_container:
-    name: "{{ project_name }}-grafana"
+    name: grafana
     state: started
     restart: true
 
 - name: Restart MinIO
   community.docker.docker_container:
-    name: "{{ project_name }}-minio"
+    name: minio
     state: started
     restart: true

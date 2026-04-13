@@ -17,9 +17,11 @@
 - name: Deploy Alertmanager container
   community.docker.docker_container:
     name: alertmanager
-    image: prom/alertmanager:v0.27.0
+    image: "{{ docker_alertmanager_image }}"
     state: started
     restart_policy: unless-stopped
+    networks:
+      - name: med-ops-net
     ports:
       - "9093:9093"
     volumes:
