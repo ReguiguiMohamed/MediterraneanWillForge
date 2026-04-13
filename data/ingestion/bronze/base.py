@@ -161,6 +161,7 @@ class BronzeIngestor(ABC):
             partition_by=["partition_date"],
             storage_options=self.storage.options,
             schema_mode="merge",
+            engine="rust",
         )
 
     # ── Entry point ───────────────────────────────────────────────────────────
