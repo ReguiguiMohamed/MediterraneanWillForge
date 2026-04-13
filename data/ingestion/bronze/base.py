@@ -131,11 +131,16 @@ class BronzeIngestor(ABC):
         self._rows_gauge.labels(layer="bronze", source=self.source_name).set(rows)
         self._freshness_gauge.labels(layer="bronze").set(time.time())
         self._duration_gauge.labels(stage=f"bronze_{self.source_name}").set(elapsed)
-        push_to_gateway(
-            self.pushgateway_url,
-            job=f"med_ops_bronze_{self.source_name}",
-            registry=self._registry,
-        )
+        try:
+            push_to_gateway(
+                self.pushgateway_url,
+                job=f"med_ops_bronze_{self.source_name}",
+                registry=self._registry,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"[{self.source_name}] Pushgateway unavailable — metrics not pushed: {exc}"
+            )
 
     # ── Delta Lake helpers ────────────────────────────────────────────────────
 
