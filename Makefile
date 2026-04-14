@@ -33,10 +33,10 @@ provision: ## Run Ansible site playbook
 	ansible-playbook -i ansible/inventory/hosts.ini ansible/site.yml
 
 # ── Data pipeline ─────────────────────────────────────────────────────────────
-ingest-openmeteo: ## Run bronze ingestion — Open-Meteo (gridded CAMS model data, 12 cities)
+ingest-openmeteo: ## Run bronze ingestion — Open-Meteo Air Quality API (12 city grid points)
 	docker compose -f docker/docker-compose.yml run --rm ingestion python -m ingestion.bronze.copernicus_ingestor
 
-ingest-openaq: ## Run bronze ingestion — OpenAQ v2 (station observations, North Africa + Med)
+ingest-openaq: ## Run bronze ingestion — OpenAQ v2 station observations
 	docker compose -f docker/docker-compose.yml run --rm ingestion python -m ingestion.bronze.openaq_ingestor
 
 ingest-bronze: ingest-openmeteo ingest-openaq ## Run all bronze ingestors

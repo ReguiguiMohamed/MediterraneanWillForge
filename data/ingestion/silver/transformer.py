@@ -69,6 +69,58 @@ _POLLUTANTS = list(WHO.keys())
 # Stations with fewer than this fraction of valid pollutant values are dropped
 _MIN_COMPLETENESS = 0.20
 
+_SILVER_COLUMNS = [
+    "station_id",
+    "station_name",
+    "city",
+    "country_code",
+    "latitude",
+    "longitude",
+    "date",
+    "pm2_5",
+    "pm10",
+    "nitrogen_dioxide",
+    "ozone",
+    "aqi_category",
+    "who_pm25_exceed",
+    "who_pm10_exceed",
+    "who_no2_exceed",
+    "who_o3_exceed",
+    "data_completeness",
+    "source",
+    "silver_ts",
+    "partition_date",
+]
+
+_STRING_COLUMNS = [
+    "station_id",
+    "station_name",
+    "city",
+    "country_code",
+    "date",
+    "aqi_category",
+    "source",
+    "silver_ts",
+    "partition_date",
+]
+
+_FLOAT_COLUMNS = [
+    "latitude",
+    "longitude",
+    "pm2_5",
+    "pm10",
+    "nitrogen_dioxide",
+    "ozone",
+    "data_completeness",
+]
+
+_INT_COLUMNS = [
+    "who_pm25_exceed",
+    "who_pm10_exceed",
+    "who_no2_exceed",
+    "who_o3_exceed",
+]
+
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -169,6 +221,32 @@ def enrich(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _canonicalize_for_delta(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return Silver rows in canonical column order with Delta-safe dtypes.
+
+    delta-rs rejects Arrow Null columns. Open-Meteo has no city field, so the
+    city column is intentionally all-null for that source; keep it as a string
+    column with null values instead of letting pyarrow infer the Null type.
+    """
+    df = df.copy()
+
+    for col in _SILVER_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    for col in _STRING_COLUMNS:
+        df[col] = df[col].astype("string")
+
+    for col in _FLOAT_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
+
+    for col in _INT_COLUMNS:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype("int64")
+
+    return df[_SILVER_COLUMNS]
+
+
 def _aqi_category(pm25: float | None) -> str:
     """US EPA PM2.5 AQI breakpoints."""
     if pm25 is None or (isinstance(pm25, float) and np.isnan(pm25)):
@@ -193,6 +271,25 @@ def _exceed_flag(df: pd.DataFrame, col: str, threshold: float) -> pd.Series:
 # ── Incremental partition management ──────────────────────────────────────────
 
 
+def _dates_from_files(files: list[str]) -> set[str]:
+    """
+    Extract partition_date values by parsing Delta file paths.
+
+    With engine="rust", partition columns are excluded from Parquet data files
+    and live only in the directory path (e.g. partition_date=2024-01-15/…).
+    Reading them via to_pandas()["partition_date"] fails silently on
+    deltalake 0.18.x because the column is absent from the Parquet schema.
+    Parsing dt.files() is immune to that problem.
+    """
+    dates: set[str] = set()
+    for path in files:
+        for segment in path.replace("\\", "/").split("/"):
+            if segment.startswith("partition_date="):
+                dates.add(segment.split("=", 1)[1])
+                break
+    return dates
+
+
 def _unprocessed_partitions(
     bronze_path: str,
     silver_path: str,
@@ -202,23 +299,28 @@ def _unprocessed_partitions(
     """
     Return Bronze partition dates not yet present in Silver for this source.
 
-    NOTE: do NOT pass columns=["partition_date"] to to_pandas().
-    With engine="rust", partition columns are stored only in the directory
-    path, not inside the Parquet data files.  Requesting them via column
-    projection raises a PyArrow schema error that was previously swallowed
-    silently, making the transformer think nothing needed processing.
+    Uses dt.files() path-parsing instead of to_pandas()["partition_date"].
+    With engine="rust", partition columns are excluded from Parquet data files,
+    so any attempt to read them via column projection or DataFrame indexing
+    raises a silent error that makes the transformer skip all partitions.
     """
     try:
         bronze_dt = DeltaTable(bronze_path, storage_options=storage_options)
-        bronze_dates = set(bronze_dt.to_pandas()["partition_date"].unique())
+        bronze_dates = _dates_from_files(bronze_dt.files())
     except Exception as exc:
         logger.warning(f"[{source}] Cannot read Bronze table at {bronze_path}: {exc}")
         return []
 
+    if not bronze_dates:
+        logger.warning(
+            f"[{source}] Bronze table exists but contains no partition_date files: {bronze_path}"
+        )
+        return []
+
     try:
         silver_dt = DeltaTable(silver_path, storage_options=storage_options)
-        silver_df = silver_dt.to_pandas(filters=[("source", "=", source)])
-        silver_dates = set(silver_df["partition_date"].unique())
+        silver_source_files = [f for f in silver_dt.files() if f"source={source}" in f]
+        silver_dates = _dates_from_files(silver_source_files)
     except Exception:
         silver_dates = set()
 
@@ -274,6 +376,7 @@ def run() -> None:
     logger.info("Silver transformation starting.")
     t_start = time.monotonic()
     total_rows = 0
+    failures: list[str] = []
 
     for source, bronze_path in sources:
         partitions = _unprocessed_partitions(
@@ -294,6 +397,13 @@ def run() -> None:
                 raw_df = bronze_dt.to_pandas(
                     filters=[("partition_date", "=", partition)]
                 )
+                # engine="rust" excludes partition columns from Parquet data
+                # files; they live only in the directory path.  If to_pandas()
+                # doesn't reconstruct them, add partition_date back manually so
+                # write_deltalake can use it for Silver partitioning.
+                if "partition_date" not in raw_df.columns:
+                    raw_df = raw_df.copy()
+                    raw_df["partition_date"] = partition
 
                 cleaned = clean(raw_df, source)
                 enriched = enrich(cleaned)
@@ -303,6 +413,8 @@ def run() -> None:
                         f"[{source}] Partition {partition} — 0 rows after cleaning, skipping write."
                     )
                     continue
+
+                enriched = _canonicalize_for_delta(enriched)
 
                 write_deltalake(
                     silver_path,
@@ -319,6 +431,7 @@ def run() -> None:
                 )
 
             except Exception as exc:
+                failures.append(f"{source}/{partition}: {exc}")
                 logger.error(f"[{source}] Partition {partition} failed: {exc}")
 
         rows_gauge.labels(layer="silver", source=source).set(total_rows)
@@ -333,6 +446,12 @@ def run() -> None:
         )
     except Exception as exc:
         logger.warning(f"Pushgateway push failed (best-effort): {exc}")
+
+    if failures:
+        raise RuntimeError(
+            "Silver transformation failed for partition(s): " + "; ".join(failures)
+        )
+
     logger.success(
         f"Silver transformation complete — {total_rows} rows across all sources, {elapsed:.1f}s"
     )

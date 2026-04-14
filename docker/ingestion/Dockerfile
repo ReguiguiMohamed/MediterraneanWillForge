@@ -21,6 +21,6 @@ COPY data/schemas/   ./schemas/
 RUN useradd -m -u 1001 medops && chown -R medops:medops /app
 USER medops
 
-# Default: run Copernicus (Open-Meteo) ingestor.
+# Default: run the Open-Meteo Air Quality ingestor.
 # Override at runtime: python -m ingestion.bronze.openaq_ingestor
 CMD ["python", "-m", "ingestion.bronze.copernicus_ingestor"]

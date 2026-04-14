@@ -9,10 +9,13 @@ Tests cover:
 """
 
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from data.ingestion.silver.transformer import (
     _aqi_category,
+    _canonicalize_for_delta,
+    _dates_from_files,
     clean,
     enrich,
 )
@@ -181,6 +184,33 @@ class TestEnrich:
         enriched = enrich(cleaned)
         assert "silver_ts" in enriched.columns
         assert enriched["silver_ts"].notna().all()
+
+
+class TestDeltaPreparation:
+    def test_all_null_city_stays_string_for_delta(self, openmeteo_df):
+        openmeteo_df = openmeteo_df.drop(columns=["city"], errors="ignore")
+        cleaned = clean(openmeteo_df, "openmeteo")
+        enriched = enrich(cleaned)
+        prepared = _canonicalize_for_delta(enriched)
+
+        arrow_schema = pa.Table.from_pandas(prepared, preserve_index=False).schema
+
+        assert prepared.columns.tolist()[-1] == "partition_date"
+        assert pa.types.is_string(arrow_schema.field("city").type)
+        assert not pa.types.is_null(arrow_schema.field("city").type)
+
+    def test_dates_from_files_reads_hive_partition_paths(self):
+        files = [
+            "partition_date=2024-01-15/part-0001.snappy.parquet",
+            "partition_date=2024-01-16/source=openmeteo/part-0002.snappy.parquet",
+            "source=openmeteo/partition_date=2024-01-17/part-0003.snappy.parquet",
+        ]
+
+        assert _dates_from_files(files) == {
+            "2024-01-15",
+            "2024-01-16",
+            "2024-01-17",
+        }
 
 
 # ── _aqi_category() ───────────────────────────────────────────────────────────

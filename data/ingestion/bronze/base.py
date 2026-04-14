@@ -145,15 +145,18 @@ class BronzeIngestor(ABC):
     # ── Delta Lake helpers ────────────────────────────────────────────────────
 
     def _partition_exists(self, target_date: date) -> bool:
-        """Return True if the date partition is already present in the Delta table."""
+        """Return True if the date partition is already present in the Delta table.
+
+        Uses dt.files() path inspection instead of to_pandas(columns=[...]).
+        With engine="rust", partition columns are excluded from Parquet data
+        files, so column-projection reads raise silent errors that always
+        return False, breaking idempotency.
+        """
         partition_value = target_date.strftime("%Y-%m-%d")
+        prefix = f"partition_date={partition_value}"
         try:
             dt = DeltaTable(self.table_path, storage_options=self.storage.options)
-            sample = dt.to_pandas(
-                columns=["partition_date"],
-                filters=[("partition_date", "=", partition_value)],
-            )
-            return not sample.empty
+            return any(prefix in f for f in dt.files())
         except Exception:
             return False
 
