@@ -1,8 +1,6 @@
-# Mediterranean Ops Fortress
+# MediterraneanWillForge
 
-> *I forge infrastructure with discipline and clarity — no half-measures, no fragile systems, only what endures and protects.*
-
-A production-grade hybrid **Data Engineering + DevOps** platform built to ingest, transform, and monitor real Mediterranean climate resilience data. Air quality readings, temperature extremes, and wildfire risk indicators pulled daily from Copernicus CAMS and EEA Discomap APIs — structured into a proper lakehouse, observed end-to-end, and deployed with zero manual steps.
+This platform is  built to ingest, transform, and monitor real Mediterranean climate resilience data. Air quality readings, temperature extremes, and wildfire risk indicators pulled daily from Copernicus CAMS and EEA Discomap APIs — structured into a proper lakehouse, observed end-to-end, and deployed with zero manual steps.
 
 This is not a tutorial project. Every tool earns its place. Every metric is intentional.
 
