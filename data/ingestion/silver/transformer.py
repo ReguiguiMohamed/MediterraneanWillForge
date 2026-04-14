@@ -201,21 +201,23 @@ def _unprocessed_partitions(
 ) -> list[str]:
     """
     Return Bronze partition dates not yet present in Silver for this source.
+
+    NOTE: do NOT pass columns=["partition_date"] to to_pandas().
+    With engine="rust", partition columns are stored only in the directory
+    path, not inside the Parquet data files.  Requesting them via column
+    projection raises a PyArrow schema error that was previously swallowed
+    silently, making the transformer think nothing needed processing.
     """
     try:
         bronze_dt = DeltaTable(bronze_path, storage_options=storage_options)
-        bronze_dates = set(
-            bronze_dt.to_pandas(columns=["partition_date"])["partition_date"].unique()
-        )
-    except Exception:
+        bronze_dates = set(bronze_dt.to_pandas()["partition_date"].unique())
+    except Exception as exc:
+        logger.warning(f"[{source}] Cannot read Bronze table at {bronze_path}: {exc}")
         return []
 
     try:
         silver_dt = DeltaTable(silver_path, storage_options=storage_options)
-        silver_df = silver_dt.to_pandas(
-            columns=["partition_date", "source"],
-            filters=[("source", "=", source)],
-        )
+        silver_df = silver_dt.to_pandas(filters=[("source", "=", source)])
         silver_dates = set(silver_df["partition_date"].unique())
     except Exception:
         silver_dates = set()
