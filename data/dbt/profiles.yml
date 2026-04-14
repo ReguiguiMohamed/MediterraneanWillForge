@@ -9,6 +9,17 @@
 #   MINIO_SECRET_KEY  — MinIO secret key           (default: minioadmin)
 #   DBT_DUCKDB_PATH   — DuckDB file path           (default: /tmp/med_ops_dbt.duckdb)
 #
+# IMPORTANT — delta_scan() and the AWS SDK env vars:
+#   DuckDB's delta extension uses the delta-rs Rust library (DeltaKernel) which
+#   runs its own S3 client.  It does NOT inherit the DuckDB httpfs SET s3_*
+#   settings below.  For local MinIO you must also export:
+#     AWS_ENDPOINT_URL=http://localhost:9000
+#     AWS_ACCESS_KEY_ID=minioadmin
+#     AWS_SECRET_ACCESS_KEY=minioadmin
+#     AWS_ALLOW_HTTP=true
+#     AWS_DEFAULT_REGION=us-east-1
+#   Without these, delta-rs falls through to EC2 IMDS and fails.
+#
 # The file path matters: staging views and materialised tables must persist
 # across separate dbt invocations (compile → run → test), so :memory: is NOT used.
 

@@ -49,14 +49,15 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values:
-                - good
-                - moderate
-                - unhealthy_sensitive
-                - unhealthy
-                - very_unhealthy
-                - hazardous
-                - unknown
+              arguments:
+                values:
+                  - good
+                  - moderate
+                  - unhealthy_sensitive
+                  - unhealthy
+                  - very_unhealthy
+                  - hazardous
+                  - unknown
 
       - name: who_pm25_exceeded
         description: "1 if PM2.5 > WHO 2021 guideline"
@@ -80,7 +81,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: [openmeteo, openaq]
+              arguments:
+                values: [openmeteo, openaq]
 
       - name: partition_date
         description: "Delta partition key (YYYY-MM-DD)"

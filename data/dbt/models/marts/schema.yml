@@ -23,21 +23,23 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: [openmeteo, openaq]
+              arguments:
+                values: [openmeteo, openaq]
 
       - name: dominant_aqi_tier
         description: "AQI category grouping key for this aggregate row"
         tests:
           - not_null
           - accepted_values:
-              values:
-                - good
-                - moderate
-                - unhealthy_sensitive
-                - unhealthy
-                - very_unhealthy
-                - hazardous
-                - unknown
+              arguments:
+                values:
+                  - good
+                  - moderate
+                  - unhealthy_sensitive
+                  - unhealthy
+                  - very_unhealthy
+                  - hazardous
+                  - unknown
 
       - name: station_count
         description: "Number of distinct stations contributing to the aggregate"
