@@ -1,7 +1,7 @@
 # dbt connection profile for Mediterranean Ops Fortress.
 #
 # Adapter : dbt-duckdb (DuckDB in-process, no external service needed).
-# Storage  : Silver Delta tables on MinIO (S3-compatible).
+# Storage  : Silver Parquet files on MinIO (s3://silver/air_quality/**/*.parquet).
 #
 # Required env vars (all default to local MinIO dev values):
 #   MINIO_HOST        — host:port only, no scheme  (default: localhost:9000)
@@ -9,20 +9,15 @@
 #   MINIO_SECRET_KEY  — MinIO secret key           (default: minioadmin)
 #   DBT_DUCKDB_PATH   — DuckDB file path           (default: /tmp/med_ops_dbt.duckdb)
 #
-# Credential architecture — two separate S3 clients:
+# S3 credential architecture:
+#   read_parquet() uses DuckDB's httpfs extension, which reads the SET s3_*
+#   variables configured in the settings: block below.  This is the same
+#   credential path used by the ingestion pipeline and is confirmed working.
 #
-#   1. httpfs (settings:) — used by read_parquet(), read_csv(), etc.
-#      Reads DuckDB SET s3_* variables configured below.
-#
-#   2. delta extension (secrets:) — used by delta_scan().
-#      Uses DuckDB's secret manager ONLY.  It does NOT read SET s3_* variables
-#      and does NOT read AWS SDK env vars (AWS_ENDPOINT_URL etc.).
-#      Without a secret entry it falls through to EC2 IMDS (169.254.169.254)
-#      and fails with HTTP 411 on GitHub Actions.
-#
-#      dbt-duckdb generates "CREATE OR REPLACE TEMPORARY SECRET (...)" at
-#      connection init time — before any model is compiled or run.
-#      provider: config forces static credentials; IMDS is never attempted.
+#   Note: delta_scan() in DuckDB 1.0.x (bundled in dbt-duckdb 1.8.0) does NOT
+#   use these settings — it uses delta-kernel-rs which queries EC2 IMDS on
+#   credential miss, causing HTTP 411 on GitHub Actions.  For this reason the
+#   staging model reads Parquet files directly rather than using delta_scan().
 #
 # The file path matters: staging views and materialised tables must persist
 # across separate dbt invocations (compile → run → test), so :memory: is NOT used.
@@ -35,18 +30,6 @@ med_ops_fortress:
       path: "{{ env_var('DBT_DUCKDB_PATH', '/tmp/med_ops_dbt.duckdb') }}"
       extensions:
         - httpfs
-        - delta
-      # DuckDB secret manager — consumed by delta_scan() via delta extension
-      secrets:
-        - type: S3
-          provider: config
-          key_id:    "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"
-          secret:    "{{ env_var('MINIO_SECRET_KEY', 'minioadmin') }}"
-          endpoint:  "{{ env_var('MINIO_HOST', 'localhost:9000') }}"
-          url_style: path
-          use_ssl:   false
-          region:    us-east-1
-      # httpfs SET variables — consumed by read_parquet() / read_csv() etc.
       settings:
         s3_endpoint:          "{{ env_var('MINIO_HOST', 'localhost:9000') }}"
         s3_access_key_id:     "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"

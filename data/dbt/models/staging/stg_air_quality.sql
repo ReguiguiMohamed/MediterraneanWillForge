@@ -1,19 +1,29 @@
 -- stg_air_quality.sql
 -- Staging view over the Silver Delta table.
 --
--- Reads directly via DuckDB's delta_scan() — MinIO S3 credentials are
--- applied at connection time from profiles.yml (s3_endpoint, s3_access_key_id,
--- s3_secret_access_key, s3_use_ssl, s3_url_style).
+-- Reads Parquet data files directly via DuckDB's httpfs extension.
+-- S3 credentials are configured in profiles.yml via the settings: block
+-- (SET s3_endpoint, s3_access_key_id, etc.) which httpfs picks up correctly.
 --
--- Column aliases follow the mart naming convention: pollutant values get
--- explicit units (_ug_m3), WHO flags get the past-tense suffix (_exceeded),
--- and the date is renamed to observation_date to avoid reserved-word clashes.
+-- Why not delta_scan()?
+--   DuckDB 1.0.x (bundled in dbt-duckdb 1.8.0) delta_scan() uses delta-kernel-rs
+--   which does NOT read DuckDB's SET s3_* settings.  It falls through to EC2 IMDS
+--   and fails with HTTP 411 on GitHub Actions.  read_parquet() uses httpfs which
+--   shares the same credential context as the rest of the pipeline.
+--
+-- Delta Lake stores partition columns in both the directory path (hive-style) and
+-- inside the Parquet data files.  Reading with hive_partitioning=false avoids
+-- duplicate column errors while still returning all canonical Silver columns.
 
 {{ config(materialized='view') }}
 
 with silver as (
     select *
-    from delta_scan('s3://silver/air_quality')
+    from read_parquet(
+        's3://silver/air_quality/**/*.parquet',
+        hive_partitioning = false,
+        union_by_name     = true
+    )
 )
 
 select
