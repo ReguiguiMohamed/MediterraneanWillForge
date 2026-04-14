@@ -215,7 +215,10 @@ def run() -> None:
     fresh_gauge.labels(layer="gold").set(time.time())
     dur_gauge.labels(stage="gold_mart").set(elapsed)
 
-    push_to_gateway(pushgateway, job="med_ops_gold_mart", registry=reg)
+    try:
+        push_to_gateway(pushgateway, job="med_ops_gold_mart", registry=reg)
+    except Exception as exc:
+        logger.warning(f"Pushgateway push failed (best-effort): {exc}")
     logger.success(f"Gold marts complete — {total_rows} total rows, {elapsed:.1f}s")
 
 

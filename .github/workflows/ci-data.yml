@@ -160,6 +160,34 @@ jobs:
           PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
         run: python -c "from data.ingestion.silver.transformer import run; run()"
 
+      - name: Verify Silver layer has rows
+        # Fail fast here rather than letting dbt silently find no files.
+        # Also prints the exact file layout so glob issues are immediately visible.
+        run: |
+          docker run --rm --network host \
+            --entrypoint /bin/sh minio/mc:latest -c "
+              mc alias set local http://localhost:9000 minioadmin minioadmin &&
+              echo '=== MinIO silver/air_quality ===' &&
+              mc ls --recursive local/silver/air_quality | head -20
+            "
+          python -c "
+from deltalake import DeltaTable
+opts = {
+    'endpoint_url':             'http://localhost:9000',
+    'aws_access_key_id':        'minioadmin',
+    'aws_secret_access_key':    'minioadmin',
+    'aws_allow_http':           'true',
+    'aws_s3_allow_unsafe_rename': 'true',
+}
+dt  = DeltaTable('s3://silver/air_quality', storage_options=opts)
+df  = dt.to_pandas()
+print(f'Silver rows   : {len(df)}')
+print(f'Columns       : {sorted(df.columns.tolist())}')
+print(f'partition_date: {sorted(df[\"partition_date\"].unique().tolist())}')
+assert len(df) > 0, 'Silver layer is empty after transformer run'
+print('Silver verification PASSED')
+"
+
       - name: Run Gold marts (Silver → Gold)
         env:
           MINIO_ENDPOINT:              http://localhost:9000
@@ -170,9 +198,6 @@ jobs:
 
       - name: dbt run + test (Silver → dbt views/tables)
         env:
-          # Consumed by profiles.yml env_var() calls.
-          # delta_scan() credentials come from the DuckDB secret manager
-          # (secrets: block in profiles.yml), NOT from AWS SDK env vars.
           MINIO_HOST:        localhost:9000
           MINIO_ACCESS_KEY:  minioadmin
           MINIO_SECRET_KEY:  minioadmin
