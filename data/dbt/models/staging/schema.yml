@@ -1,0 +1,91 @@
+version: 2
+
+models:
+  - name: stg_air_quality
+    description: >
+      Staging view over the Silver Delta table.  Reads directly via DuckDB's
+      delta_scan() and applies explicit column casts and naming aliases used
+      consistently across all downstream marts.
+    columns:
+      - name: station_id
+        description: "Unique station or grid-point identifier"
+        tests:
+          - not_null
+
+      - name: station_name
+        description: "Human-readable station name"
+
+      - name: city
+        description: "City name; null for raw grid cells"
+
+      - name: country_code
+        description: "ISO-3166-1 alpha-2"
+
+      - name: observation_date
+        description: "Observation date (cast from Silver date string)"
+        tests:
+          - not_null
+
+      - name: lat
+        description: "WGS-84 latitude"
+
+      - name: lon
+        description: "WGS-84 longitude"
+
+      - name: pm25_ug_m3
+        description: "PM2.5 daily mean µg/m³"
+
+      - name: pm10_ug_m3
+        description: "PM10 daily mean µg/m³"
+
+      - name: no2_ug_m3
+        description: "NO₂ daily mean µg/m³"
+
+      - name: o3_ug_m3
+        description: "O₃ daily mean µg/m³"
+
+      - name: aqi_category
+        description: "US EPA PM2.5 AQI tier"
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - good
+                - moderate
+                - unhealthy_sensitive
+                - unhealthy
+                - very_unhealthy
+                - hazardous
+                - unknown
+
+      - name: who_pm25_exceeded
+        description: "1 if PM2.5 > WHO 2021 guideline"
+
+      - name: who_pm10_exceeded
+        description: "1 if PM10 > WHO 2021 guideline"
+
+      - name: who_no2_exceeded
+        description: "1 if NO₂ > WHO 2021 guideline"
+
+      - name: who_o3_exceeded
+        description: "1 if O₃ > WHO 2021 guideline"
+
+      - name: data_completeness
+        description: "Fraction of 4 pollutant columns that are non-null"
+        tests:
+          - not_null
+
+      - name: source
+        description: "Data source identifier"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [openmeteo, openaq]
+
+      - name: partition_date
+        description: "Delta partition key (YYYY-MM-DD)"
+        tests:
+          - not_null
+
+      - name: _loaded_at
+        description: "UTC timestamp when the Silver row was written"

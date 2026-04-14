@@ -35,7 +35,7 @@ env/
 data/dbt/target/
 data/dbt/dbt_packages/
 data/dbt/logs/
-data/dbt/profiles.yml
+# profiles.yml uses only env_var() — safe to commit; no raw secrets
 
 # ── Great Expectations ─────────────────────────────────────────────────────────
 data/quality/expectations/.ge_store_backend_id

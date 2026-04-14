@@ -1,0 +1,29 @@
+# dbt connection profile for Mediterranean Ops Fortress.
+#
+# Adapter : dbt-duckdb (DuckDB in-process, no external service needed).
+# Storage  : Silver Delta tables on MinIO (S3-compatible).
+#
+# Required env vars (all default to local MinIO dev values):
+#   MINIO_HOST        — host:port only, no scheme  (default: localhost:9000)
+#   MINIO_ACCESS_KEY  — MinIO access key           (default: minioadmin)
+#   MINIO_SECRET_KEY  — MinIO secret key           (default: minioadmin)
+#   DBT_DUCKDB_PATH   — DuckDB file path           (default: /tmp/med_ops_dbt.duckdb)
+#
+# The file path matters: staging views and materialised tables must persist
+# across separate dbt invocations (compile → run → test), so :memory: is NOT used.
+
+med_ops_fortress:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', '/tmp/med_ops_dbt.duckdb') }}"
+      extensions:
+        - httpfs
+        - delta
+      settings:
+        s3_endpoint:          "{{ env_var('MINIO_HOST', 'localhost:9000') }}"
+        s3_access_key_id:     "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"
+        s3_secret_access_key: "{{ env_var('MINIO_SECRET_KEY', 'minioadmin') }}"
+        s3_use_ssl:           "false"
+        s3_url_style:         "path"

@@ -190,6 +190,7 @@ def run() -> None:
         f"s3://{gold_bucket}/daily_country_summary",
         summary,
         mode="overwrite",
+        engine="rust",
         storage_options=storage_opts,
         schema_mode="overwrite",
     )
@@ -201,6 +202,7 @@ def run() -> None:
         f"s3://{gold_bucket}/wildfire_risk_index",
         risk,
         mode="overwrite",
+        engine="rust",
         storage_options=storage_opts,
         schema_mode="overwrite",
     )

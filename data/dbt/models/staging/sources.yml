@@ -1,0 +1,65 @@
+version: 2
+
+sources:
+  - name: silver
+    description: >
+      Silver layer — cleaned, type-enforced, WHO-2021-flagged air quality records
+      written by data/ingestion/silver/transformer.py.  Stored as a Delta table
+      on MinIO at s3://silver/air_quality, partitioned by (partition_date, source).
+    schema: silver
+
+    tables:
+      - name: air_quality
+        description: >
+          Unified Silver Delta table combining two real data sources:
+            • openmeteo  — CAMS gridded model output for 12 Mediterranean cities
+            • openaq     — Ground-station observations from 10 North African /
+                           Mediterranean countries
+          One row per (station_id, date, source).  Incremental: only partitions
+          absent from Silver are written on each transformer run.
+        meta:
+          # delta_scan() is called directly in stg_air_quality.sql; this entry
+          # documents the source schema and is used by dbt docs generate.
+          delta_table_path: "s3://silver/air_quality"
+
+        columns:
+          - name: station_id
+            description: "Unique station or grid-point identifier (e.g. tunis_tn)"
+          - name: station_name
+            description: "Human-readable station name"
+          - name: city
+            description: "City name; null for raw grid cells"
+          - name: country_code
+            description: "ISO-3166-1 alpha-2 (e.g. TN, DZ, MA)"
+          - name: latitude
+            description: "WGS-84 latitude"
+          - name: longitude
+            description: "WGS-84 longitude"
+          - name: date
+            description: "Observation date string YYYY-MM-DD"
+          - name: pm2_5
+            description: "PM2.5 daily mean µg/m³ (clipped 0–1000)"
+          - name: pm10
+            description: "PM10 daily mean µg/m³ (clipped 0–2000)"
+          - name: nitrogen_dioxide
+            description: "NO₂ daily mean µg/m³ (clipped 0–500)"
+          - name: ozone
+            description: "O₃ daily mean µg/m³ (clipped 0–500)"
+          - name: aqi_category
+            description: "US EPA PM2.5 AQI tier: good | moderate | unhealthy_sensitive | unhealthy | very_unhealthy | hazardous | unknown"
+          - name: who_pm25_exceed
+            description: "1 if PM2.5 > 15 µg/m³ (WHO 2021 guideline)"
+          - name: who_pm10_exceed
+            description: "1 if PM10 > 45 µg/m³"
+          - name: who_no2_exceed
+            description: "1 if NO₂ > 25 µg/m³"
+          - name: who_o3_exceed
+            description: "1 if O₃ > 100 µg/m³"
+          - name: data_completeness
+            description: "Fraction of the 4 pollutant columns that are non-null (0.0–1.0)"
+          - name: source
+            description: "Data source: openmeteo or openaq"
+          - name: silver_ts
+            description: "UTC ISO-8601 timestamp when this row was written to Silver"
+          - name: partition_date
+            description: "Delta partition key YYYY-MM-DD (matches date for daily data)"

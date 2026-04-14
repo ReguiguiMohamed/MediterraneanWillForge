@@ -1,0 +1,76 @@
+version: 2
+
+models:
+  - name: mart_daily_air_quality
+    description: >
+      Daily air quality summary per country, source, and AQI tier.
+      Aggregates station-level Silver readings (via stg_air_quality) to a
+      country × date × source × AQI-tier granularity.  This is the primary
+      analytics-facing table: clean, typed, and documented.
+    columns:
+      - name: observation_date
+        description: "Calendar date of the aggregated readings"
+        tests:
+          - not_null
+
+      - name: country_code
+        description: "ISO-3166-1 alpha-2 country code"
+        tests:
+          - not_null
+
+      - name: source
+        description: "Data source: openmeteo or openaq"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [openmeteo, openaq]
+
+      - name: dominant_aqi_tier
+        description: "AQI category grouping key for this aggregate row"
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - good
+                - moderate
+                - unhealthy_sensitive
+                - unhealthy
+                - very_unhealthy
+                - hazardous
+                - unknown
+
+      - name: station_count
+        description: "Number of distinct stations contributing to the aggregate"
+        tests:
+          - not_null
+
+      - name: daily_mean_pm25
+        description: "Mean PM2.5 (µg/m³) across all stations for this group"
+
+      - name: daily_max_pm25
+        description: "Maximum PM2.5 (µg/m³) across all stations for this group"
+
+      - name: daily_mean_pm10
+        description: "Mean PM10 (µg/m³) across all stations for this group"
+
+      - name: daily_mean_no2
+        description: "Mean NO₂ (µg/m³) across all stations for this group"
+
+      - name: daily_mean_o3
+        description: "Mean O₃ (µg/m³) across all stations for this group"
+
+      - name: who_pm25_exceed_pct
+        description: "Percentage of stations exceeding the WHO PM2.5 guideline"
+
+      - name: who_no2_exceed_pct
+        description: "Percentage of stations exceeding the WHO NO₂ guideline"
+
+      - name: mean_data_completeness
+        description: "Average data completeness (0–1) across all stations in the aggregate"
+        tests:
+          - not_null
+
+      - name: mart_ts
+        description: "Timestamp when this row was materialised"
+        tests:
+          - not_null

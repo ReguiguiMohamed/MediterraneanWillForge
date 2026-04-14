@@ -18,6 +18,9 @@ pydantic==2.7.4
 # ── Observability ─────────────────────────────────────────────────────────────
 prometheus-client==0.20.0
 
+# ── dbt ───────────────────────────────────────────────────────────────────────
+dbt-duckdb==1.8.0      # dbt-core bundled; DuckDB adapter with httpfs + delta
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv==1.0.1
 loguru==0.7.2
