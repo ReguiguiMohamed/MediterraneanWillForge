@@ -306,6 +306,7 @@ def run() -> None:
                     silver_path,
                     enriched,
                     mode="append",
+                    engine="rust",
                     partition_by=["partition_date", "source"],
                     storage_options=cfg.storage_options,
                     schema_mode="merge",
@@ -324,7 +325,12 @@ def run() -> None:
     fresh_gauge.labels(layer="silver").set(time.time())
     dur_gauge.labels(stage="silver_transform").set(elapsed)
 
-    push_to_gateway(cfg.pushgateway_url, job="med_ops_silver_transform", registry=reg)
+    try:
+        push_to_gateway(
+            cfg.pushgateway_url, job="med_ops_silver_transform", registry=reg
+        )
+    except Exception as exc:
+        logger.warning(f"Pushgateway push failed (best-effort): {exc}")
     logger.success(
         f"Silver transformation complete — {total_rows} rows across all sources, {elapsed:.1f}s"
     )
