@@ -20,8 +20,14 @@
 with silver as (
     select *
     from read_parquet(
-        's3://silver/air_quality/**/*.parquet',
-        hive_partitioning = false,
+        -- Explicit two-level wildcard matches the Delta partition structure:
+        --   partition_date=YYYY-MM-DD / source=openmeteo|openaq / *.parquet
+        -- DuckDB httpfs does not support ** recursive globs on S3 paths.
+        -- hive_partitioning=true is required because engine="rust" excludes
+        -- partition columns from Parquet data files (standard Delta behaviour);
+        -- they must be re-extracted from the directory path.
+        's3://silver/air_quality/partition_date=*/source=*/*.parquet',
+        hive_partitioning = true,
         union_by_name     = true
     )
 )
