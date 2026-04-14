@@ -170,20 +170,13 @@ jobs:
 
       - name: dbt run + test (Silver → dbt views/tables)
         env:
-          # DuckDB httpfs settings (resolved via profiles.yml Jinja env_var())
+          # Consumed by profiles.yml env_var() calls.
+          # delta_scan() credentials come from the DuckDB secret manager
+          # (secrets: block in profiles.yml), NOT from AWS SDK env vars.
           MINIO_HOST:        localhost:9000
           MINIO_ACCESS_KEY:  minioadmin
           MINIO_SECRET_KEY:  minioadmin
           DBT_DUCKDB_PATH:   /tmp/med_ops_dbt.duckdb
-          # delta-rs (DeltaKernel) has its own S3 client and does NOT inherit
-          # DuckDB's SET s3_* settings.  It falls back to IMDS when these are
-          # absent, causing a 411 on GitHub Actions.  Set the standard AWS SDK
-          # env vars so delta_scan() can reach MinIO directly.
-          AWS_ENDPOINT_URL:       http://localhost:9000
-          AWS_ACCESS_KEY_ID:      minioadmin
-          AWS_SECRET_ACCESS_KEY:  minioadmin
-          AWS_ALLOW_HTTP:         "true"
-          AWS_DEFAULT_REGION:     us-east-1
         run: |
           cd data/dbt
           dbt run   --profiles-dir . --project-dir .

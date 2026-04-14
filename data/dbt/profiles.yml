@@ -9,16 +9,20 @@
 #   MINIO_SECRET_KEY  — MinIO secret key           (default: minioadmin)
 #   DBT_DUCKDB_PATH   — DuckDB file path           (default: /tmp/med_ops_dbt.duckdb)
 #
-# IMPORTANT — delta_scan() and the AWS SDK env vars:
-#   DuckDB's delta extension uses the delta-rs Rust library (DeltaKernel) which
-#   runs its own S3 client.  It does NOT inherit the DuckDB httpfs SET s3_*
-#   settings below.  For local MinIO you must also export:
-#     AWS_ENDPOINT_URL=http://localhost:9000
-#     AWS_ACCESS_KEY_ID=minioadmin
-#     AWS_SECRET_ACCESS_KEY=minioadmin
-#     AWS_ALLOW_HTTP=true
-#     AWS_DEFAULT_REGION=us-east-1
-#   Without these, delta-rs falls through to EC2 IMDS and fails.
+# Credential architecture — two separate S3 clients:
+#
+#   1. httpfs (settings:) — used by read_parquet(), read_csv(), etc.
+#      Reads DuckDB SET s3_* variables configured below.
+#
+#   2. delta extension (secrets:) — used by delta_scan().
+#      Uses DuckDB's secret manager ONLY.  It does NOT read SET s3_* variables
+#      and does NOT read AWS SDK env vars (AWS_ENDPOINT_URL etc.).
+#      Without a secret entry it falls through to EC2 IMDS (169.254.169.254)
+#      and fails with HTTP 411 on GitHub Actions.
+#
+#      dbt-duckdb generates "CREATE OR REPLACE TEMPORARY SECRET (...)" at
+#      connection init time — before any model is compiled or run.
+#      provider: config forces static credentials; IMDS is never attempted.
 #
 # The file path matters: staging views and materialised tables must persist
 # across separate dbt invocations (compile → run → test), so :memory: is NOT used.
@@ -32,6 +36,17 @@ med_ops_fortress:
       extensions:
         - httpfs
         - delta
+      # DuckDB secret manager — consumed by delta_scan() via delta extension
+      secrets:
+        - type: S3
+          provider: config
+          key_id:    "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"
+          secret:    "{{ env_var('MINIO_SECRET_KEY', 'minioadmin') }}"
+          endpoint:  "{{ env_var('MINIO_HOST', 'localhost:9000') }}"
+          url_style: path
+          use_ssl:   false
+          region:    us-east-1
+      # httpfs SET variables — consumed by read_parquet() / read_csv() etc.
       settings:
         s3_endpoint:          "{{ env_var('MINIO_HOST', 'localhost:9000') }}"
         s3_access_key_id:     "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"
