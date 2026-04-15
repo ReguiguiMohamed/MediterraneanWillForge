@@ -88,3 +88,4 @@ logs/
 *.key
 secrets/
 credentials/
+CHECKPOINT.md

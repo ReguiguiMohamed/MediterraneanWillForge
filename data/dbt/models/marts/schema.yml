@@ -3,76 +3,120 @@ version: 2
 models:
   - name: mart_daily_air_quality
     description: >
-      Daily air quality summary per country, source, and AQI tier.
-      Aggregates station-level Silver readings (via stg_air_quality) to a
-      country × date × source × AQI-tier granularity.  This is the primary
-      analytics-facing table: clean, typed, and documented.
+      Daily air quality summary per country, source, and AQI tier. This table
+      aggregates station-level Silver readings through stg_air_quality for
+      analytics and dashboard consumption.
     columns:
       - name: observation_date
-        description: "Calendar date of the aggregated readings"
+        description: "Calendar date of the aggregated readings."
         tests:
           - not_null
 
       - name: country_code
-        description: "ISO-3166-1 alpha-2 country code"
+        description: "ISO-3166-1 alpha-2 country code."
         tests:
           - not_null
 
       - name: source
-        description: "Data source: openmeteo or openaq"
+        description: "Canonical data source identifier."
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values: [openmeteo, openaq]
+              values: [openmeteo, openaq]
 
       - name: dominant_aqi_tier
-        description: "AQI category grouping key for this aggregate row"
+        description: "AQI category grouping key for the aggregate row."
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values:
-                  - good
-                  - moderate
-                  - unhealthy_sensitive
-                  - unhealthy
-                  - very_unhealthy
-                  - hazardous
-                  - unknown
+              values:
+                - good
+                - moderate
+                - unhealthy_sensitive
+                - unhealthy
+                - very_unhealthy
+                - hazardous
+                - unknown
 
       - name: station_count
-        description: "Number of distinct stations contributing to the aggregate"
+        description: "Number of distinct stations contributing to the aggregate."
         tests:
           - not_null
+          - accepted_range:
+              min_value: 1
 
-      - name: daily_mean_pm25
-        description: "Mean PM2.5 (µg/m³) across all stations for this group"
+      - name: daily_mean_pm2_5
+        description: "Mean PM2.5 across all stations for this group."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 1000
 
-      - name: daily_max_pm25
-        description: "Maximum PM2.5 (µg/m³) across all stations for this group"
+      - name: daily_max_pm2_5
+        description: "Maximum PM2.5 across all stations for this group."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 1000
 
       - name: daily_mean_pm10
-        description: "Mean PM10 (µg/m³) across all stations for this group"
+        description: "Mean PM10 across all stations for this group."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 2000
 
-      - name: daily_mean_no2
-        description: "Mean NO₂ (µg/m³) across all stations for this group"
+      - name: daily_mean_nitrogen_dioxide
+        description: "Mean nitrogen dioxide across all stations for this group."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 500
 
-      - name: daily_mean_o3
-        description: "Mean O₃ (µg/m³) across all stations for this group"
+      - name: daily_mean_ozone
+        description: "Mean ozone across all stations for this group."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 500
 
       - name: who_pm25_exceed_pct
-        description: "Percentage of stations exceeding the WHO PM2.5 guideline"
+        description: "Percentage of stations exceeding the WHO PM2.5 guideline."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 100
+
+      - name: who_pm10_exceed_pct
+        description: "Percentage of stations exceeding the WHO PM10 guideline."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 100
 
       - name: who_no2_exceed_pct
-        description: "Percentage of stations exceeding the WHO NO₂ guideline"
+        description: "Percentage of stations exceeding the WHO nitrogen dioxide guideline."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 100
+
+      - name: who_o3_exceed_pct
+        description: "Percentage of stations exceeding the WHO ozone guideline."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 100
 
       - name: mean_data_completeness
-        description: "Average data completeness (0–1) across all stations in the aggregate"
+        description: "Average data completeness across all stations in the aggregate."
         tests:
           - not_null
+          - accepted_range:
+              min_value: 0
+              max_value: 1
 
       - name: mart_ts
-        description: "Timestamp when this row was materialised"
+        description: "Timestamp when this row was materialized."
         tests:
           - not_null

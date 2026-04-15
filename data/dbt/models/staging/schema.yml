@@ -3,91 +3,138 @@ version: 2
 models:
   - name: stg_air_quality
     description: >
-      Staging view over the Silver Delta table.  Reads directly via DuckDB's
-      delta_scan() and applies explicit column casts and naming aliases used
-      consistently across all downstream marts.
+      Typed staging view over the Silver Delta table. The model reads Silver
+      Parquet data files from MinIO through DuckDB httpfs and preserves the
+      canonical pollutant column names used by the Python pipeline.
     columns:
       - name: station_id
-        description: "Unique station or grid-point identifier"
+        description: "Unique station or grid-point identifier."
         tests:
           - not_null
 
       - name: station_name
-        description: "Human-readable station name"
+        description: "Human-readable station name."
 
       - name: city
-        description: "City name; null for raw grid cells"
+        description: "City name when provided by the source."
 
       - name: country_code
-        description: "ISO-3166-1 alpha-2"
+        description: "ISO-3166-1 alpha-2 country code."
+        tests:
+          - not_null
 
       - name: observation_date
-        description: "Observation date (cast from Silver date string)"
+        description: "Observation date cast from the Silver date string."
         tests:
           - not_null
 
-      - name: lat
-        description: "WGS-84 latitude"
+      - name: latitude
+        description: "WGS-84 latitude."
+        tests:
+          - not_null
+          - accepted_range:
+              min_value: -90
+              max_value: 90
 
-      - name: lon
-        description: "WGS-84 longitude"
+      - name: longitude
+        description: "WGS-84 longitude."
+        tests:
+          - not_null
+          - accepted_range:
+              min_value: -180
+              max_value: 180
 
-      - name: pm25_ug_m3
-        description: "PM2.5 daily mean µg/m³"
+      - name: pm2_5
+        description: "PM2.5 daily mean in micrograms per cubic meter."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 1000
 
-      - name: pm10_ug_m3
-        description: "PM10 daily mean µg/m³"
+      - name: pm10
+        description: "PM10 daily mean in micrograms per cubic meter."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 2000
 
-      - name: no2_ug_m3
-        description: "NO₂ daily mean µg/m³"
+      - name: nitrogen_dioxide
+        description: "Nitrogen dioxide daily mean in micrograms per cubic meter."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 500
 
-      - name: o3_ug_m3
-        description: "O₃ daily mean µg/m³"
+      - name: ozone
+        description: "Ozone daily mean in micrograms per cubic meter."
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 500
 
       - name: aqi_category
-        description: "US EPA PM2.5 AQI tier"
+        description: "US EPA PM2.5 AQI tier."
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values:
-                  - good
-                  - moderate
-                  - unhealthy_sensitive
-                  - unhealthy
-                  - very_unhealthy
-                  - hazardous
-                  - unknown
+              values:
+                - good
+                - moderate
+                - unhealthy_sensitive
+                - unhealthy
+                - very_unhealthy
+                - hazardous
+                - unknown
 
-      - name: who_pm25_exceeded
-        description: "1 if PM2.5 > WHO 2021 guideline"
+      - name: who_pm25_exceed
+        description: "1 if PM2.5 exceeds the WHO 2021 daily guideline."
+        tests:
+          - accepted_values:
+              values: [0, 1]
+              quote: false
 
-      - name: who_pm10_exceeded
-        description: "1 if PM10 > WHO 2021 guideline"
+      - name: who_pm10_exceed
+        description: "1 if PM10 exceeds the WHO 2021 daily guideline."
+        tests:
+          - accepted_values:
+              values: [0, 1]
+              quote: false
 
-      - name: who_no2_exceeded
-        description: "1 if NO₂ > WHO 2021 guideline"
+      - name: who_no2_exceed
+        description: "1 if nitrogen dioxide exceeds the WHO 2021 daily guideline."
+        tests:
+          - accepted_values:
+              values: [0, 1]
+              quote: false
 
-      - name: who_o3_exceeded
-        description: "1 if O₃ > WHO 2021 guideline"
+      - name: who_o3_exceed
+        description: "1 if ozone exceeds the WHO 2021 daily guideline."
+        tests:
+          - accepted_values:
+              values: [0, 1]
+              quote: false
 
       - name: data_completeness
-        description: "Fraction of 4 pollutant columns that are non-null"
+        description: "Fraction of canonical pollutant columns that are non-null."
         tests:
           - not_null
+          - accepted_range:
+              min_value: 0
+              max_value: 1
 
       - name: source
-        description: "Data source identifier"
+        description: "Canonical data source identifier."
         tests:
           - not_null
           - accepted_values:
-              arguments:
-                values: [openmeteo, openaq]
+              values: [openmeteo, openaq]
 
       - name: partition_date
-        description: "Delta partition key (YYYY-MM-DD)"
+        description: "Delta partition key, YYYY-MM-DD."
         tests:
           - not_null
 
       - name: _loaded_at
-        description: "UTC timestamp when the Silver row was written"
+        description: "UTC timestamp when the Silver row was written."
+        tests:
+          - not_null
