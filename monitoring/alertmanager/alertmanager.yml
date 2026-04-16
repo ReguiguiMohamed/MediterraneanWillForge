@@ -1,47 +1,118 @@
 # Mediterranean Ops Fortress — Alertmanager Configuration
-# Every alert is routed with intent. No noise, no missed signals.
+#
+# Receiver webhooks default to localhost placeholders.
+# Override in production via Ansible vars (common.yml) or environment secrets.
+# Never commit real tokens, passwords, or Slack/PagerDuty URLs to this file.
+#
+# Routing intent:
+#   critical              → infra_critical   (fast: 10 s wait, 1 h repeat)
+#   severity=pipeline     → pipeline_ops     (quality gate failures)
+#   severity=warning
+#     + layer label       → pipeline_ops     (freshness / row-count anomalies)
+#   everything else       → infra_ops        (infra warnings, slow stages)
 
 global:
   resolve_timeout: 5m
 
+# ---------------------------------------------------------------------------
+# Top-level route
+# ---------------------------------------------------------------------------
 route:
-  group_by:       ["alertname", "layer", "severity"]
-  group_wait:     30s
-  group_interval: 5m
+  group_by: [alertname, layer, severity, environment]
+  group_wait:      30s
+  group_interval:  5m
   repeat_interval: 4h
-  receiver: default
+  receiver: infra_ops
 
   routes:
-    - match:
-        severity: critical
-      receiver: critical
-      group_wait: 10s
+    # ── Critical infrastructure ─────────────────────────────────────────────
+    # Covers: ContainerDown, MinIODown, DiskUsageCritical
+    # Short group_wait — these pages must arrive fast.
+    - matchers:
+        - severity = critical
+      receiver: infra_critical
+      group_wait:      10s
+      group_interval:  2m
       repeat_interval: 1h
 
-    - match:
-        severity: pipeline
-      receiver: pipeline_team
-      group_wait: 1m
+    # ── Pipeline quality gate failures ──────────────────────────────────────
+    # Covers: DataQualityCheckFailed (severity=pipeline)
+    # Medium latency — quality failures are urgent but not on-call emergencies.
+    - matchers:
+        - severity = pipeline
+      receiver: pipeline_ops
+      group_wait:      1m
+      group_interval:  5m
+      repeat_interval: 2h
 
+    # ── Pipeline layer freshness / row-count anomalies ──────────────────────
+    # Covers: BronzeLayerStale, SilverLayerStale, GoldLayerStale,
+    #         BronzeRowCountDrop (all carry layer=bronze|silver|gold)
+    # Longer group_wait — batch related staleness alerts before notifying.
+    - matchers:
+        - severity = warning
+        - layer =~ "bronze|silver|gold"
+      receiver: pipeline_ops
+      group_wait:      2m
+      group_interval:  10m
+      repeat_interval: 4h
+
+    # All other warnings (HighCPUUsage, HighMemoryUsage, BronzeIngestSlow,
+    # SilverTransformSlow, QualityChecksStale) fall through to infra_ops.
+
+# ---------------------------------------------------------------------------
+# Receivers
+# ---------------------------------------------------------------------------
 receivers:
-  - name: default
+  # Default catch-all — infra warnings and slow-stage alerts.
+  # PLACEHOLDER: set webhook_url to a real endpoint in ansible/vars/common.yml
+  #              e.g. a Slack incoming-webhook or an internal alerting service.
+  - name: infra_ops
     webhook_configs:
       - url: "http://localhost:5001/alerts"
         send_resolved: true
 
-  - name: critical
+  # Critical path — MinIODown, ContainerDown, DiskUsageCritical.
+  # PLACEHOLDER: replace with a high-urgency channel (PagerDuty, OpsGenie, etc.)
+  - name: infra_critical
     webhook_configs:
       - url: "http://localhost:5001/critical"
         send_resolved: true
 
-  - name: pipeline_team
+  # Pipeline operations — staleness, quality failures, row-count drops.
+  # PLACEHOLDER: replace with pipeline-team endpoint.
+  - name: pipeline_ops
     webhook_configs:
       - url: "http://localhost:5001/pipeline"
         send_resolved: true
 
+# ---------------------------------------------------------------------------
+# Inhibit rules
+# ---------------------------------------------------------------------------
 inhibit_rules:
-  - source_match:
-      severity: critical
-    target_match:
-      severity: warning
-    equal: ["alertname"]
+  # MinIO outage → suppress all pipeline-layer warnings.
+  # If the lakehouse is unreachable, Bronze/Silver/Gold will appear stale
+  # as a downstream effect — those warnings are symptoms, not root causes.
+  - source_matchers:
+      - alertname = MinIODown
+      - severity = critical
+    target_matchers:
+      - layer =~ "bronze|silver|gold"
+
+  # Container absent → suppress its own CPU and memory warnings.
+  # Perf metrics from a down container are meaningless; suppress same-name alerts.
+  - source_matchers:
+      - alertname = ContainerDown
+      - severity = critical
+    target_matchers:
+      - severity = warning
+      - alertname =~ "HighCPUUsage|HighMemoryUsage"
+    equal: [name]
+
+  # Critical severity suppresses same-named warning-level alert.
+  # Avoids dual pages for the same root cause at different severity levels.
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
+    equal: [alertname]
