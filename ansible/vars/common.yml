@@ -39,7 +39,7 @@ critical_webhook_url:  "http://localhost:5001/critical"
 pipeline_webhook_url:  "http://localhost:5001/pipeline"
 
 # ── Docker image versions (pin for reproducibility) ──────────────────────────
-docker_minio_image:        "quay.io/minio/minio:latest"
+docker_minio_image:        "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 docker_prometheus_image:   "prom/prometheus:v2.51.0"
 docker_pushgateway_image:  "prom/pushgateway:v1.8.0"
 docker_alertmanager_image: "prom/alertmanager:v0.27.0"
