@@ -8,11 +8,13 @@ on:
       - "docker/ingestion/**"
       - "docker/quality/**"
       - "tests/**"
+      - ".github/workflows/ci-data.yml"
   pull_request:
     branches: [main]
     paths:
       - "data/**"
       - "tests/**"
+      - ".github/workflows/ci-data.yml"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -182,6 +184,15 @@ jobs:
           MINIO_SECRET_KEY:            minioadmin
           PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
         run: python -c "from data.ingestion.gold.marts import run; run()"
+
+      - name: Verify Gold layer tables
+        # Asserts both Gold Delta tables exist, row counts > 0, required columns
+        # present, and value ranges are valid (risk_index in [0,100], pct in [0,100]).
+        env:
+          MINIO_ENDPOINT:   http://localhost:9000
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+        run: python tests/ci_verify_gold.py
 
       - name: dbt run + test (Silver → dbt views/tables)
         env:

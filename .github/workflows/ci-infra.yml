@@ -6,13 +6,15 @@ on:
     paths:
       - "terraform/**"
       - "ansible/**"
-      - "monitoring/prometheus/**"
+      - "monitoring/**"
+      - ".github/workflows/ci-infra.yml"
   pull_request:
     branches: [main]
     paths:
       - "terraform/**"
       - "ansible/**"
-      - "monitoring/prometheus/**"
+      - "monitoring/**"
+      - ".github/workflows/ci-infra.yml"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -101,3 +103,11 @@ jobs:
             check rules \
               /rules/infra_alerts.yml \
               /rules/pipeline_alerts.yml
+
+      - name: Check Alertmanager config
+        run: |
+          docker run --rm \
+            --entrypoint /bin/amtool \
+            -v "${{ github.workspace }}/monitoring/alertmanager:/etc/alertmanager:ro" \
+            prom/alertmanager:v0.27.0 \
+            check-config /etc/alertmanager/alertmanager.yml
