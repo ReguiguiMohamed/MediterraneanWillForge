@@ -38,6 +38,20 @@ services:
       retries:  3
 
   # ── Observability ─────────────────────────────────────────────────────────────
+  pushgateway:
+    image: prom/pushgateway:v1.8.0
+    container_name: med-ops-pushgateway
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    networks:
+      - fortress
+    healthcheck:
+      test:     ["CMD-SHELL", "wget -qO/dev/null http://localhost:9091/-/healthy || exit 1"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: med-ops-prometheus
@@ -57,16 +71,13 @@ services:
     networks:
       - fortress
     depends_on:
-      - pushgateway
-
-  pushgateway:
-    image: prom/pushgateway:v1.8.0
-    container_name: med-ops-pushgateway
-    restart: unless-stopped
-    ports:
-      - "9091:9091"
-    networks:
-      - fortress
+      pushgateway:
+        condition: service_healthy
+    healthcheck:
+      test:     ["CMD-SHELL", "wget -qO/dev/null http://localhost:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -81,6 +92,11 @@ services:
       - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     networks:
       - fortress
+    healthcheck:
+      test:     ["CMD-SHELL", "wget -qO/dev/null http://localhost:9093/-/healthy || exit 1"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
 
   grafana:
     image: grafana/grafana-oss:10.4.2
@@ -100,7 +116,34 @@ services:
     networks:
       - fortress
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test:     ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+
+  # cAdvisor exposes per-container resource metrics scraped by Prometheus at
+  # job_name=cadvisor (target: cadvisor:8080).
+  # Requires privileged mode and host path mounts — runs correctly on Linux
+  # hosts and Docker Desktop (WSL2 backend). Some metrics unavailable on macOS.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: med-ops-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - fortress
 
   # ── Data pipeline jobs ────────────────────────────────────────────────────────
   # Activated with --profile jobs. Build context is the repo root so both
