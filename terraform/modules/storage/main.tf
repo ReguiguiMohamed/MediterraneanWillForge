@@ -11,7 +11,7 @@ resource "docker_volume" "minio_data" {
 
 resource "docker_container" "minio" {
   name  = "${var.project_name}-minio"
-  image = "quay.io/minio/minio:latest"
+  image = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 
   restart = "unless-stopped"
 
@@ -64,7 +64,7 @@ resource "null_resource" "create_buckets" {
       sleep 5
       docker run --rm --network ${var.network_id} \
         --entrypoint /bin/sh \
-        minio/mc:latest -c "
+        minio/mc:RELEASE.2025-08-13T08-35-41Z -c "
           mc alias set local http://${docker_container.minio.name}:9000 \
             ${var.minio_access_key} ${var.minio_secret_key} && \
           mc mb --ignore-existing local/${var.lakehouse_buckets.bronze} && \

@@ -138,7 +138,7 @@ jobs:
         run: |
           docker run --rm --network host \
             --entrypoint /bin/sh \
-            minio/mc:latest -c "
+            minio/mc:RELEASE.2025-08-13T08-35-41Z -c "
               mc alias set local http://localhost:9000 minioadmin minioadmin && \
               mc mb --ignore-existing local/bronze && \
               mc mb --ignore-existing local/silver && \
