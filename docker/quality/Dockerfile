@@ -2,7 +2,7 @@
 # Build context: repository root (not docker/quality/).
 # docker build -f docker/quality/Dockerfile .
 
-FROM python:3.11-slim
+FROM python:3.11.15-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \

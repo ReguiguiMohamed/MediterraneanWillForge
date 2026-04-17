@@ -298,8 +298,10 @@ black==26.3.1
 - **Alertmanager receivers:** Webhook URLs in `alertmanager.yml` are
   `localhost:5001` placeholders. Real endpoints must be configured before alerts
   are actionable.
-- **python:3.11-slim Dockerfiles:** The base image tracks Python 3.11.x patch
-  releases. Full digest pinning is deferred to the v1.0.0 release.
+- **Image digest pinning:** Docker image tags are pinned to specific versions
+  (including `python:3.11.15-slim`), but not to SHA-256 digests. Tag pinning
+  protects against `:latest` drift; digest pinning would add supply-chain
+  protection against tag rewrites and is deferred.
 
 ## Design Rules
 
