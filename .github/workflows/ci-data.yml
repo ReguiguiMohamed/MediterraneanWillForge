@@ -123,7 +123,7 @@ jobs:
             -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z \
             server /data --console-address ":9001"
 
       - name: Wait for MinIO to be healthy
@@ -166,7 +166,7 @@ jobs:
         # Shows exact file paths — confirms Silver data exists and glob depth is correct.
         run: |
           docker run --rm --network host \
-            --entrypoint /bin/sh minio/mc:latest -c \
+            --entrypoint /bin/sh minio/mc:RELEASE.2025-08-13T08-35-41Z -c \
             "mc alias set local http://localhost:9000 minioadmin minioadmin && mc ls --recursive local/silver/air_quality | head -20"
 
       - name: Verify Silver layer has rows
