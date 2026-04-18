@@ -1,36 +1,44 @@
 # Mediterranean Ops Fortress — Root Terraform configuration
-# Orchestrates all modules. The infrastructure is forged here, not wished into existence.
+# Provisions OCI Always-Free infrastructure: ARM VM + Object Storage lakehouse.
 
-provider "docker" {
-  host = "unix:///var/run/docker.sock"
+provider "oci" {
+  tenancy_ocid     = var.tenancy_ocid
+  user_ocid        = var.user_ocid
+  fingerprint      = var.fingerprint
+  private_key_path = var.private_key_path
+  region           = var.region
 }
 
-# ── Networking module ──────────────────────────────────────────────────────────
+data "oci_objectstorage_namespace" "this" {
+  compartment_id = var.compartment_id
+}
+
+# ── Networking (VCN, subnet, internet gateway, security list) ─────────────────
 module "networking" {
-  source       = "./modules/networking"
-  project_name = var.project_name
-  environment  = var.environment
+  source         = "./modules/networking"
+  project_name   = var.project_name
+  environment    = var.environment
+  compartment_id = var.compartment_id
 }
 
-# ── Storage module (MinIO + volumes) ──────────────────────────────────────────
+# ── Object Storage (Bronze / Silver / Gold lakehouse buckets) ─────────────────
 module "storage" {
-  source       = "./modules/storage"
-  project_name = var.project_name
-  environment  = var.environment
-  network_id   = module.networking.fortress_network_id
-
-  minio_access_key  = var.minio_access_key
-  minio_secret_key  = var.minio_secret_key
+  source            = "./modules/storage"
+  project_name      = var.project_name
+  environment       = var.environment
+  compartment_id    = var.compartment_id
+  namespace         = data.oci_objectstorage_namespace.this.namespace
   lakehouse_buckets = var.lakehouse_buckets
 }
 
-# ── Compute module (Prometheus, Grafana, Alertmanager, Pushgateway) ───────────
+# ── Compute (ARM Ampere A1 — always-free 4 OCPUs / 24 GB) ────────────────────
 module "compute" {
-  source       = "./modules/compute"
-  project_name = var.project_name
-  environment  = var.environment
-  network_id   = module.networking.fortress_network_id
-
-  grafana_admin_password    = var.grafana_admin_password
-  prometheus_retention_days = var.prometheus_retention_days
+  source              = "./modules/compute"
+  project_name        = var.project_name
+  environment         = var.environment
+  compartment_id      = var.compartment_id
+  subnet_id           = module.networking.subnet_id
+  ssh_authorized_keys = var.ssh_authorized_keys
+  instance_ocpus      = var.instance_ocpus
+  instance_memory_gbs = var.instance_memory_gbs
 }

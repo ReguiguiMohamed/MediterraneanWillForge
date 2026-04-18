@@ -6,13 +6,14 @@
 
 Mediterranean Ops Fortress is a hybrid Data Engineering and DevOps portfolio
 project built around real Mediterranean air quality data. It ingests public API
-data, writes a Delta Lake medallion on MinIO, validates quality, builds analytics
-marts, and exposes full pipeline and infrastructure observability through
-Prometheus, Alertmanager, and Grafana.
+data, writes a Delta Lake medallion on OCI Object Storage, validates quality,
+builds analytics marts, and exposes full pipeline and infrastructure observability
+through Prometheus, Alertmanager (Slack-routed), and Grafana.
 
 This is not a tutorial scaffold. The stack is designed to behave like a small
-production data platform: reproducible infrastructure, incremental Delta writes,
-CI validation, metrics, alerts, dashboards, and no synthetic fallback data.
+production data platform: reproducible cloud infrastructure (OCI always-free),
+incremental Delta writes, CI validation, metrics, alerts, dashboards, and no
+synthetic fallback data.
 
 ## What It Does
 
@@ -44,12 +45,12 @@ Open-Meteo ----\
                 +--> Bronze --> Silver --> Gold
 OpenAQ v2 ----/                    |
                                    +--> dbt models
-              MinIO (Delta Lake)
+        OCI Object Storage (Delta Lake / S3-compat)
 
 Jobs --> Pushgateway --> Prometheus --> Grafana
                              |
                              v
-                       Alertmanager
+                       Alertmanager --> Slack
 ```
 
 ## Canonical Silver Schema
@@ -70,14 +71,16 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 
 | Domain | Tools |
 |---|---|
-| Local environment | Vagrant, VirtualBox, Ubuntu 22.04 |
-| Infrastructure | Terraform (`kreuzwerker/docker` provider, 3 modules) |
-| Configuration | Ansible (6 roles: common, docker, minio, prometheus, alertmanager, grafana) |
-| Storage | MinIO `RELEASE.2025-09-07T16-13-09Z`, Delta Lake, delta-rs |
+| Cloud infrastructure | Oracle Cloud (OCI) Always-Free — ARM Ampere A1 VM (4 OCPUs / 24 GB), Object Storage |
+| Infrastructure as code | Terraform (`oracle/oci` provider, 3 modules: networking, compute, storage) |
+| Configuration management | Ansible (5 roles: common, docker, prometheus, alertmanager, grafana) |
+| Storage | OCI Object Storage (S3-compatible), Delta Lake, delta-rs |
+| Local dev storage | MinIO `RELEASE.2025-09-07T16-13-09Z` (via docker-compose override) |
 | Data pipeline | Python 3.11, pandas, pyarrow, deltalake |
 | Transformation | Bronze, Silver, Gold Python jobs + dbt models (DuckDB over Silver) |
 | Quality | Soda-style checks, custom runner, Great Expectations schema validation |
 | Observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, Grafana `10.4.2`, cAdvisor |
+| Alerting | Slack (native Alertmanager `slack_configs`) |
 | CI/CD | GitHub Actions (3 workflows), ghcr.io image publishing |
 
 ## Repository Layout
@@ -104,7 +107,8 @@ mediterranean-ops-fortress/
 |   |-- schemas/
 |   `-- dbt/
 |-- docker/
-|   |-- docker-compose.yml
+|   |-- docker-compose.yml           # base stack (OCI storage mode)
+|   |-- docker-compose.override.yml  # local dev — adds MinIO
 |   |-- ingestion/Dockerfile
 |   `-- quality/Dockerfile
 |-- docs/
@@ -117,7 +121,8 @@ mediterranean-ops-fortress/
 |-- terraform/
 |   |-- main.tf
 |   |-- versions.tf
-|   `-- modules/
+|   |-- modules/
+|   `-- environments/cloud/terraform.tfvars.example
 |-- tests/
 |   |-- unit/
 |   |-- integration/
@@ -139,8 +144,8 @@ CAMS-backed model data. The persisted source label and storage path are `openmet
 |---|---|---|
 | Docker | 24+ | Compose stack and pipeline job containers |
 | Python | 3.11 | Local tests and development |
-| Vagrant | 2.4+ | Full VM stack (optional) |
-| VirtualBox | 7.x | VM hypervisor (optional) |
+| Terraform | 1.7+ | OCI infrastructure provisioning |
+| Ansible | 2.14+ | VM configuration and service deployment |
 
 ### Configure
 
@@ -154,32 +159,27 @@ No API keys are required. Both Open-Meteo and OpenAQ v2 are free public APIs.
 
 ---
 
-### Option A — Docker Compose (recommended for local development)
+### Option A — Docker Compose (local development)
 
-Bring up the full infrastructure stack:
+Bring up the observability stack:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-This starts MinIO, Prometheus, Pushgateway, Alertmanager, Grafana, and cAdvisor.
+This starts Prometheus, Pushgateway, Alertmanager, Grafana, and cAdvisor.
 All services expose healthchecks; Prometheus and Grafana wait for their
 dependencies before starting.
 
-Create the lakehouse buckets (one-time setup):
+To run pipeline jobs locally (adds a MinIO container for lakehouse storage):
 
 ```bash
-docker run --rm --network host \
-  --entrypoint /bin/sh \
-  minio/mc:RELEASE.2025-08-13T08-35-41Z -c "
-    mc alias set local http://localhost:9000 minioadmin minioadmin &&
-    mc mb --ignore-existing local/bronze &&
-    mc mb --ignore-existing local/silver &&
-    mc mb --ignore-existing local/gold
-  "
+# docker-compose.override.yml is merged automatically when present
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.yml \
+  --profile jobs up -d
 ```
 
-Run the full pipeline:
+Run the full pipeline (with local MinIO):
 
 ```bash
 make ingest       # bronze (both sources) -> silver -> gold
@@ -192,34 +192,42 @@ Access the stack:
 
 | Service | URL |
 |---|---|
-| MinIO console | http://localhost:9001 (minioadmin / minioadmin) |
+| MinIO console (local dev only) | http://localhost:9001 (minioadmin / minioadmin) |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 (admin / fortress) |
 | Alertmanager | http://localhost:9093 |
 | Pushgateway | http://localhost:9091 |
 
-Stop the stack:
-
-```bash
-docker compose -f docker/docker-compose.yml down
-```
-
 ---
 
-### Option B — Vagrant + Full VM Stack
+### Option B — OCI Cloud Deployment
 
-Provision the local VM and infrastructure:
+Provision the cloud VM and storage with Terraform, then configure with Ansible.
+All OCI resources used fall under the [Always Free tier](https://www.oracle.com/cloud/free/).
 
 ```bash
-make up           # vagrant up — boots Ubuntu 22.04 VM at 192.168.56.10
-make tf-init      # terraform init
-make tf-apply     # provisions Docker network, MinIO, and observability containers
-make provision    # ansible configures all services on the VM
+cd terraform
+cp environments/cloud/terraform.tfvars.example environments/cloud/terraform.tfvars
+# fill in tenancy_ocid, user_ocid, fingerprint, private_key_path, ssh_authorized_keys
+terraform init
+terraform apply -var-file=environments/cloud/terraform.tfvars
 ```
 
-Run the pipeline from the host via compose (targets the VM's Docker engine):
+Terraform outputs the VM public IP and S3-compatible Object Storage endpoint.
 
 ```bash
+# Update ansible/inventory/hosts.ini with the VM public IP
+# Update ansible/vars/common.yml with OCI storage credentials and Slack webhook URL
+cd ../ansible
+ansible-playbook site.yml -i inventory/hosts.ini
+```
+
+Run the pipeline against OCI Object Storage:
+
+```bash
+export MINIO_ENDPOINT=$(terraform output -raw s3_endpoint)
+export MINIO_ACCESS_KEY=<oci-customer-secret-key-id>
+export MINIO_SECRET_KEY=<oci-customer-secret-key-value>
 make ingest
 make quality
 ```
@@ -265,8 +273,9 @@ DiskUsageCritical, HighCPU, HighMemory).
 
 Alertmanager routes alerts into three groups: `infra_critical` (fast path,
 1 h repeat), `pipeline_ops` (freshness and quality failures), and `infra_ops`
-(warnings and slow stages). Webhook receivers are localhost placeholders;
-override in `ansible/vars/common.yml` for a real deployment.
+(warnings and slow stages). Cloud deployments use native Slack `slack_configs`
+configured via `ansible/vars/common.yml`. Local dev uses localhost stubs
+(no real notifications — intentional for development).
 
 ## CI/CD
 
@@ -288,20 +297,19 @@ black==26.3.1
 - **OpenAQ v2 historical data:** The `/v2/measurements` endpoint returns HTTP 410
   for dates older than the platform's retention window. Integration tests and CI
   skip OpenAQ gracefully when this occurs. No synthetic fallback data is used.
-- **Local storage only:** MinIO runs on a local Vagrant VM or Docker Compose
-  stack. There is no cloud storage backend or remote Delta catalog.
-- **No cloud deployment:** Terraform and Ansible target a local VirtualBox VM.
-  No cloud provider is provisioned.
-- **node_exporter:** Prometheus scrapes `192.168.56.10:9100` (the Vagrant VM).
-  This target shows as DOWN in local compose runs where the VM is not active.
-  This is expected and does not affect pipeline operation.
-- **Alertmanager receivers:** Webhook URLs in `alertmanager.yml` are
-  `localhost:5001` placeholders. Real endpoints must be configured before alerts
-  are actionable.
+- **OCI storage auth:** The pipeline uses OCI Customer Secret Keys for S3-compat
+  access, which are separate from OCI API signing keys. Both must be created
+  before `terraform apply` and pipeline runs.
+- **node_exporter:** Shows as DOWN in local compose runs (no VM to scrape).
+  UP in cloud deployments where node_exporter runs on the OCI VM.
+- **Local dev alerting:** `monitoring/alertmanager/alertmanager.yml` uses
+  `localhost:5001` stubs intentionally — local dev does not send real alerts.
+  The cloud path (Ansible-generated config) uses Slack.
 - **Image digest pinning:** Docker image tags are pinned to specific versions
   (including `python:3.11.15-slim`), but not to SHA-256 digests. Tag pinning
   protects against `:latest` drift; digest pinning would add supply-chain
   protection against tag rewrites and is deferred.
+- **No Kubernetes, secrets manager, or production SLAs.**
 
 ## Design Rules
 

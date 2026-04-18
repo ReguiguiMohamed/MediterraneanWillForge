@@ -1,15 +1,9 @@
-output "prometheus_port" {
-  value = 9090
+output "public_ip" {
+  description = "Public IP of the fortress VM"
+  value       = oci_core_instance.fortress.public_ip
 }
 
-output "pushgateway_port" {
-  value = 9091
-}
-
-output "alertmanager_port" {
-  value = 9093
-}
-
-output "grafana_port" {
-  value = 3000
+output "instance_id" {
+  description = "OCID of the fortress instance"
+  value       = oci_core_instance.fortress.id
 }

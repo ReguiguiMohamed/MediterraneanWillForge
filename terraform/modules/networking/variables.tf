@@ -5,3 +5,8 @@ variable "project_name" {
 variable "environment" {
   type = string
 }
+
+variable "compartment_id" {
+  description = "OCI compartment OCID"
+  type        = string
+}

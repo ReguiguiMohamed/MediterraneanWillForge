@@ -8,34 +8,10 @@ networks:
         - subnet: 172.28.0.0/16
 
 volumes:
-  minio_data:
   prometheus_data:
   grafana_data:
 
 services:
-
-  # ── Lakehouse storage ─────────────────────────────────────────────────────────
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: med-ops-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER:            ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD:        ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_PROMETHEUS_AUTH_TYPE: public
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - fortress
-    healthcheck:
-      test:     ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout:  10s
-      retries:  3
 
   # ── Observability ─────────────────────────────────────────────────────────────
   pushgateway:
@@ -126,8 +102,6 @@ services:
 
   # cAdvisor exposes per-container resource metrics scraped by Prometheus at
   # job_name=cadvisor (target: cadvisor:8080).
-  # Requires privileged mode and host path mounts — runs correctly on Linux
-  # hosts and Docker Desktop (WSL2 backend). Some metrics unavailable on macOS.
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     container_name: med-ops-cadvisor
@@ -146,8 +120,9 @@ services:
       - fortress
 
   # ── Data pipeline jobs ────────────────────────────────────────────────────────
-  # Activated with --profile jobs. Build context is the repo root so both
-  # Dockerfiles can access data/ and docker/ from a single context.
+  # Activated with --profile jobs.
+  # MINIO_ENDPOINT must point to OCI Object Storage (or local MinIO via override).
+  # Build context is the repo root so both Dockerfiles can access data/ and docker/.
   ingestion:
     build:
       context: ..
@@ -158,12 +133,12 @@ services:
     env_file:
       - ../.env
     environment:
-      MINIO_ENDPOINT:              http://minio:9000
-      PROMETHEUS_PUSHGATEWAY_URL:  http://pushgateway:9091
+      MINIO_ENDPOINT:             ${MINIO_ENDPOINT}
+      PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
     networks:
       - fortress
     depends_on:
-      minio:
+      pushgateway:
         condition: service_healthy
 
   quality:
@@ -176,13 +151,13 @@ services:
     env_file:
       - ../.env
     environment:
-      MINIO_ENDPOINT:             http://minio:9000
+      MINIO_ENDPOINT:             ${MINIO_ENDPOINT}
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
-      MINIO_BUCKET_BRONZE:        bronze
-      MINIO_BUCKET_SILVER:        silver
+      MINIO_BUCKET_BRONZE:        ${MINIO_BUCKET_BRONZE:-med-ops-fortress-bronze}
+      MINIO_BUCKET_SILVER:        ${MINIO_BUCKET_SILVER:-med-ops-fortress-silver}
       QUALITY_LOOKBACK_DAYS:      "1"
     networks:
       - fortress
     depends_on:
-      minio:
+      pushgateway:
         condition: service_healthy

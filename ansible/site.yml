@@ -1,7 +1,7 @@
 ---
 # Mediterranean Ops Fortress — Master Playbook
+# Targets an OCI ARM VM provisioned by Terraform.
 # Applies all roles in dependency order.
-# No half-measures: every service is configured, not just installed.
 
 - name: Mediterranean Ops Fortress — Full Stack Provisioning
   hosts: fortress
@@ -19,7 +19,6 @@
   roles:
     - role: common          # Base OS hardening, user setup, system packages
     - role: docker          # Docker Engine + Docker Compose plugin
-    - role: minio           # MinIO object store (lakehouse backend)
     - role: prometheus      # Prometheus + Pushgateway + alert rules
     - role: alertmanager    # Alertmanager with routing config
     - role: grafana         # Grafana with provisioned datasources + dashboards

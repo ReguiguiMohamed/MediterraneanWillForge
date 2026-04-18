@@ -1,0 +1,53 @@
+# docker-compose.override.yml — local development only
+#
+# Adds a MinIO container so the pipeline jobs can run without OCI credentials.
+# Docker Compose merges this automatically when both files are present.
+#
+# Usage:
+#   docker compose up                    # observability stack only (cloud storage mode)
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up  # with local MinIO
+#
+# Pipeline jobs pick up the local MinIO endpoint via MINIO_ENDPOINT below.
+
+volumes:
+  minio_data:
+
+services:
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: med-ops-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:            ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD:        ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - fortress
+    healthcheck:
+      test:     ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+
+  ingestion:
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  quality:
+    environment:
+      MINIO_ENDPOINT:        http://minio:9000
+      MINIO_BUCKET_BRONZE:   bronze
+      MINIO_BUCKET_SILVER:   silver
+    depends_on:
+      minio:
+        condition: service_healthy

@@ -1,26 +1,28 @@
 ---
 # ansible/vars/common.yml
 # Single source of truth for all role variables.
-# Sensitive values should be overridden via Ansible Vault or extra-vars in CI.
-# Every variable here has a safe local default so vagrant up works out of the box.
+# Sensitive values (Slack webhook URLs, Grafana password) must be overridden via
+# Ansible Vault or --extra-vars in CI. Never commit real secrets here.
 
 # ── Project ───────────────────────────────────────────────────────────────────
-project_name: med-ops-fortress
-project_root:  /opt/med-ops-fortress
-pipeline_env:  local
+project_name:    med-ops-fortress
+project_root:    /opt/med-ops-fortress
+pipeline_env:    prod
 pipeline_region: TN-MED
 
-# ── MinIO ─────────────────────────────────────────────────────────────────────
-minio_access_key: minioadmin
-minio_secret_key: minioadmin
-minio_bucket_bronze: bronze
-minio_bucket_silver: silver
-minio_bucket_gold:   gold
-minio_data_dir:      /data/minio
+# ── Backblaze B2 (S3-compatible lakehouse backend) ────────────────────────────
+# Override storage_access_key and storage_secret_key via Ansible Vault.
+storage_endpoint:    "https://s3.eu-central-003.backblazeb2.com"
+storage_access_key:  "CHANGE_ME"            # B2 Application Key ID — use Vault
+storage_secret_key:  "CHANGE_ME"            # B2 Application Key — use Vault
+storage_use_ssl:     "true"
+minio_bucket_bronze: "med-ops-mohamed-bronze"
+minio_bucket_silver: "med-ops-mohamed-silver"
+minio_bucket_gold:   "med-ops-mohamed-gold"
 
 # ── Grafana ───────────────────────────────────────────────────────────────────
 grafana_admin_user:     admin
-grafana_admin_password: fortress
+grafana_admin_password: "CHANGE_ME"         # Override via Ansible Vault
 grafana_port:           3000
 
 # ── Prometheus ────────────────────────────────────────────────────────────────
@@ -31,18 +33,17 @@ pushgateway_port:          9091
 # ── Alertmanager ─────────────────────────────────────────────────────────────
 alertmanager_port: 9093
 
-# Alert routing — override in production with real webhook/SMTP
-smtp_host:             "localhost:587"
-alert_from_email:      "alerts@med-ops-fortress.local"
-webhook_url:           "http://localhost:5001/alerts"
-critical_webhook_url:  "http://localhost:5001/critical"
-pipeline_webhook_url:  "http://localhost:5001/pipeline"
+# Slack incoming webhook — create at: https://api.slack.com/messaging/webhooks
+# Override via Ansible Vault in production.
+slack_webhook_url:          "https://hooks.slack.com/services/PLACEHOLDER"
+slack_channel_ops:          "#med-ops-alerts"
+slack_channel_critical:     "#med-ops-critical"
+slack_channel_pipeline:     "#med-ops-pipeline"
 
-# ── Docker image versions (pin for reproducibility) ──────────────────────────
-docker_minio_image:        "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
-docker_prometheus_image:   "prom/prometheus:v2.51.0"
-docker_pushgateway_image:  "prom/pushgateway:v1.8.0"
-docker_alertmanager_image: "prom/alertmanager:v0.27.0"
-docker_grafana_image:      "grafana/grafana-oss:10.4.2"
-docker_cadvisor_image:     "gcr.io/cadvisor/cadvisor:v0.49.1"
+# ── Docker image versions (pinned) ───────────────────────────────────────────
+docker_prometheus_image:    "prom/prometheus:v2.51.0"
+docker_pushgateway_image:   "prom/pushgateway:v1.8.0"
+docker_alertmanager_image:  "prom/alertmanager:v0.27.0"
+docker_grafana_image:       "grafana/grafana-oss:10.4.2"
+docker_cadvisor_image:      "gcr.io/cadvisor/cadvisor:v0.49.1"
 docker_node_exporter_image: "prom/node-exporter:v1.8.0"

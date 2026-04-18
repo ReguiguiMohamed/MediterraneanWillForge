@@ -1,8 +1,11 @@
-# Mediterranean Ops Fortress — Alertmanager Configuration
+# Mediterranean Ops Fortress — Alertmanager Configuration (local dev)
 #
-# Receiver webhooks default to localhost placeholders.
-# Override in production via Ansible vars (common.yml) or environment secrets.
-# Never commit real tokens, passwords, or Slack/PagerDuty URLs to this file.
+# This file is used when running docker-compose locally.
+# Webhook URLs below are intentional stubs — local dev does not send real alerts.
+#
+# For the cloud deployment (OCI), Ansible generates the live config from
+# ansible/roles/alertmanager/templates/alertmanager.yml.j2 using Slack webhooks
+# defined in ansible/vars/common.yml (overridden via Ansible Vault).
 #
 # Routing intent:
 #   critical              → infra_critical   (fast: 10 s wait, 1 h repeat)
@@ -25,9 +28,6 @@ route:
   receiver: infra_ops
 
   routes:
-    # ── Critical infrastructure ─────────────────────────────────────────────
-    # Covers: ContainerDown, MinIODown, DiskUsageCritical
-    # Short group_wait — these pages must arrive fast.
     - matchers:
         - severity = critical
       receiver: infra_critical
@@ -35,9 +35,6 @@ route:
       group_interval:  2m
       repeat_interval: 1h
 
-    # ── Pipeline quality gate failures ──────────────────────────────────────
-    # Covers: DataQualityCheckFailed (severity=pipeline)
-    # Medium latency — quality failures are urgent but not on-call emergencies.
     - matchers:
         - severity = pipeline
       receiver: pipeline_ops
@@ -45,10 +42,6 @@ route:
       group_interval:  5m
       repeat_interval: 2h
 
-    # ── Pipeline layer freshness / row-count anomalies ──────────────────────
-    # Covers: BronzeLayerStale, SilverLayerStale, GoldLayerStale,
-    #         BronzeRowCountDrop (all carry layer=bronze|silver|gold)
-    # Longer group_wait — batch related staleness alerts before notifying.
     - matchers:
         - severity = warning
         - layer =~ "bronze|silver|gold"
@@ -57,30 +50,20 @@ route:
       group_interval:  10m
       repeat_interval: 4h
 
-    # All other warnings (HighCPUUsage, HighMemoryUsage, BronzeIngestSlow,
-    # SilverTransformSlow, QualityChecksStale) fall through to infra_ops.
-
 # ---------------------------------------------------------------------------
-# Receivers
+# Receivers — localhost stubs for local dev only
 # ---------------------------------------------------------------------------
 receivers:
-  # Default catch-all — infra warnings and slow-stage alerts.
-  # PLACEHOLDER: set webhook_url to a real endpoint in ansible/vars/common.yml
-  #              e.g. a Slack incoming-webhook or an internal alerting service.
   - name: infra_ops
     webhook_configs:
       - url: "http://localhost:5001/alerts"
         send_resolved: true
 
-  # Critical path — MinIODown, ContainerDown, DiskUsageCritical.
-  # PLACEHOLDER: replace with a high-urgency channel (PagerDuty, OpsGenie, etc.)
   - name: infra_critical
     webhook_configs:
       - url: "http://localhost:5001/critical"
         send_resolved: true
 
-  # Pipeline operations — staleness, quality failures, row-count drops.
-  # PLACEHOLDER: replace with pipeline-team endpoint.
   - name: pipeline_ops
     webhook_configs:
       - url: "http://localhost:5001/pipeline"
@@ -90,17 +73,12 @@ receivers:
 # Inhibit rules
 # ---------------------------------------------------------------------------
 inhibit_rules:
-  # MinIO outage → suppress all pipeline-layer warnings.
-  # If the lakehouse is unreachable, Bronze/Silver/Gold will appear stale
-  # as a downstream effect — those warnings are symptoms, not root causes.
   - source_matchers:
       - alertname = MinIODown
       - severity = critical
     target_matchers:
       - layer =~ "bronze|silver|gold"
 
-  # Container absent → suppress its own CPU and memory warnings.
-  # Perf metrics from a down container are meaningless; suppress same-name alerts.
   - source_matchers:
       - alertname = ContainerDown
       - severity = critical
@@ -109,8 +87,6 @@ inhibit_rules:
       - alertname =~ "HighCPUUsage|HighMemoryUsage"
     equal: [name]
 
-  # Critical severity suppresses same-named warning-level alert.
-  # Avoids dual pages for the same root cause at different severity levels.
   - source_matchers:
       - severity = critical
     target_matchers:

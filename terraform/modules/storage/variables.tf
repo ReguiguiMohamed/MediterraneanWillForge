@@ -6,21 +6,18 @@ variable "environment" {
   type = string
 }
 
-variable "network_id" {
-  type = string
+variable "compartment_id" {
+  description = "OCI compartment OCID"
+  type        = string
 }
 
-variable "minio_access_key" {
-  type      = string
-  sensitive = true
-}
-
-variable "minio_secret_key" {
-  type      = string
-  sensitive = true
+variable "namespace" {
+  description = "OCI Object Storage namespace (from data.oci_objectstorage_namespace)"
+  type        = string
 }
 
 variable "lakehouse_buckets" {
+  description = "Bucket name suffixes for each medallion layer"
   type = object({
     bronze = string
     silver = string

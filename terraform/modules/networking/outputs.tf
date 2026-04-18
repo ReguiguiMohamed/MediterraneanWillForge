@@ -1,9 +1,9 @@
-output "fortress_network_id" {
-  description = "ID of the shared Docker bridge network"
-  value       = docker_network.fortress.id
+output "subnet_id" {
+  description = "OCID of the public subnet — passed to compute module"
+  value       = oci_core_subnet.public.id
 }
 
-output "fortress_network_name" {
-  description = "Name of the shared Docker bridge network"
-  value       = docker_network.fortress.name
+output "vcn_id" {
+  description = "OCID of the fortress VCN"
+  value       = oci_core_vcn.fortress.id
 }
