@@ -5,19 +5,14 @@ Fails with exit code 1 and a clear message if Silver is empty or unreadable,
 so the CI job fails at this step rather than silently passing through to dbt.
 """
 
-import os
 import sys
 
 from deltalake import DeltaTable
 from loguru import logger
 
-opts = {
-    "endpoint_url": os.environ["MINIO_ENDPOINT"],
-    "aws_access_key_id": os.environ["MINIO_ACCESS_KEY"],
-    "aws_secret_access_key": os.environ["MINIO_SECRET_KEY"],
-    "aws_allow_http": "true",
-    "aws_s3_allow_unsafe_rename": "true",
-}
+from data.storage import delta_storage_options
+
+opts = delta_storage_options()
 
 try:
     dt = DeltaTable("s3://silver/air_quality", storage_options=opts)

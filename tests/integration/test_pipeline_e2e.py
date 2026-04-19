@@ -9,15 +9,15 @@ import pytest
 import requests
 from datetime import date
 
+from data.storage import delta_storage_options
+
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
 
-_STORAGE_OPTS = {
-    "endpoint_url": MINIO_ENDPOINT,
-    "aws_access_key_id": os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
-    "aws_secret_access_key": os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
-    "aws_allow_http": "true",
-    "aws_s3_allow_unsafe_rename": "true",
-}
+_STORAGE_OPTS = delta_storage_options(
+    endpoint=MINIO_ENDPOINT,
+    access_key=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
+    secret_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
+)
 
 
 def minio_available() -> bool:

@@ -48,6 +48,8 @@ from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
+from data.storage import delta_storage_options
+
 # ── WHO 2021 24-hour guideline thresholds (µg/m³) ─────────────────────────────
 WHO = {
     "pm2_5": 15.0,
@@ -134,22 +136,13 @@ class SilverConfig:
 
     @classmethod
     def from_env(cls) -> SilverConfig:
-        endpoint = os.environ["MINIO_ENDPOINT"]
-        access_key = os.environ["MINIO_ACCESS_KEY"]
-        secret_key = os.environ["MINIO_SECRET_KEY"]
         return cls(
             bronze_bucket=os.environ.get("MINIO_BUCKET_BRONZE", "bronze"),
             silver_bucket=os.environ.get("MINIO_BUCKET_SILVER", "silver"),
             pushgateway_url=os.environ.get(
                 "PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091"
             ),
-            storage_options={
-                "endpoint_url": endpoint,
-                "aws_access_key_id": access_key,
-                "aws_secret_access_key": secret_key,
-                "aws_allow_http": "true",
-                "aws_s3_allow_unsafe_rename": "true",
-            },
+            storage_options=delta_storage_options(),
         )
 
 

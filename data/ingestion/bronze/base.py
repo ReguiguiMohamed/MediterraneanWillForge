@@ -28,6 +28,8 @@ from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
+from data.storage import delta_storage_options
+
 # ── Storage configuration ──────────────────────────────────────────────────────
 
 
@@ -43,13 +45,7 @@ class StorageConfig:
     @property
     def options(self) -> dict[str, str]:
         """Delta Lake storage options for the S3A connector."""
-        return {
-            "endpoint_url": self.endpoint,
-            "aws_access_key_id": self.access_key,
-            "aws_secret_access_key": self.secret_key,
-            "aws_allow_http": "true",
-            "aws_s3_allow_unsafe_rename": "true",
-        }
+        return delta_storage_options(self.endpoint, self.access_key, self.secret_key)
 
     @classmethod
     def from_env(cls) -> StorageConfig:

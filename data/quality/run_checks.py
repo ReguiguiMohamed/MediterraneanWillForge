@@ -31,17 +31,13 @@ from deltalake import DeltaTable
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
+from data.storage import delta_storage_options
+
 # ── Storage config ─────────────────────────────────────────────────────────────
 
 
 def _storage_options() -> dict[str, str]:
-    return {
-        "endpoint_url": os.environ["MINIO_ENDPOINT"],
-        "aws_access_key_id": os.environ["MINIO_ACCESS_KEY"],
-        "aws_secret_access_key": os.environ["MINIO_SECRET_KEY"],
-        "aws_allow_http": "true",
-        "aws_s3_allow_unsafe_rename": "true",
-    }
+    return delta_storage_options()
 
 
 # ── Check result ───────────────────────────────────────────────────────────────
