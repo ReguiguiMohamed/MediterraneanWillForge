@@ -6,7 +6,7 @@
 
 Mediterranean Ops Fortress is a hybrid Data Engineering and DevOps portfolio
 project built around real Mediterranean air quality data. It ingests public API
-data, writes a Delta Lake medallion on OCI Object Storage, validates quality,
+data, writes a Delta Lake medallion on Backblaze B2, validates quality,
 builds analytics marts, and exposes full pipeline and infrastructure observability
 through Prometheus, Alertmanager (Slack-routed), and Grafana.
 
@@ -45,7 +45,7 @@ Open-Meteo ----\
                 +--> Bronze --> Silver --> Gold
 OpenAQ v2 ----/                    |
                                    +--> dbt models
-        OCI Object Storage (Delta Lake / S3-compat)
+        Backblaze B2 (Delta Lake / S3-compat)
 
 Jobs --> Pushgateway --> Prometheus --> Grafana
                              |
@@ -71,17 +71,17 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 
 | Domain | Tools |
 |---|---|
-| Cloud infrastructure | Oracle Cloud (OCI) Always-Free — ARM Ampere A1 VM (4 OCPUs / 24 GB), Object Storage |
+| Cloud infrastructure | Oracle Cloud (OCI) Always-Free — ARM Ampere A1 VM (4 OCPUs / 24 GB) |
 | Infrastructure as code | Terraform (`oracle/oci` provider, 3 modules: networking, compute, storage) |
 | Configuration management | Ansible (5 roles: common, docker, prometheus, alertmanager, grafana) |
-| Storage | OCI Object Storage (S3-compatible), Delta Lake, delta-rs |
+| Storage | Backblaze B2 (S3-compatible, `eu-central-003`), Delta Lake, delta-rs |
 | Local dev storage | MinIO `RELEASE.2025-09-07T16-13-09Z` (via docker-compose override) |
 | Data pipeline | Python 3.11, pandas, pyarrow, deltalake |
 | Transformation | Bronze, Silver, Gold Python jobs + dbt models (DuckDB over Silver) |
 | Quality | Soda-style checks, custom runner, Great Expectations schema validation |
 | Observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, Grafana `10.4.2`, cAdvisor |
 | Alerting | Slack (native Alertmanager `slack_configs`) |
-| CI/CD | GitHub Actions (3 workflows), ghcr.io image publishing |
+| CI/CD | GitHub Actions (4 workflows), ghcr.io image publishing |
 
 ## Repository Layout
 
@@ -90,7 +90,8 @@ mediterranean-ops-fortress/
 |-- .github/workflows/
 |   |-- ci-data.yml          # lint, unit tests, dbt compile, integration tests
 |   |-- ci-infra.yml         # terraform, ansible, prometheus, alertmanager checks
-|   `-- cd-deploy.yml        # ghcr.io image publishing
+|   |-- cd-deploy.yml        # ghcr.io image publishing
+|   `-- pipeline-run.yml     # manual run against real B2 (workflow_dispatch)
 |-- ansible/
 |   |-- site.yml
 |   |-- vars/common.yml
@@ -222,15 +223,19 @@ cd ../ansible
 ansible-playbook site.yml -i inventory/hosts.ini
 ```
 
-Run the pipeline against OCI Object Storage:
+Run the pipeline against Backblaze B2:
 
 ```bash
-export MINIO_ENDPOINT=$(terraform output -raw s3_endpoint)
-export MINIO_ACCESS_KEY=<oci-customer-secret-key-id>
-export MINIO_SECRET_KEY=<oci-customer-secret-key-value>
+# Fill in B2 credentials in .env (create an Application Key at backblaze.com)
+export MINIO_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
+export MINIO_ACCESS_KEY=<b2-key-id>
+export MINIO_SECRET_KEY=<b2-application-key>
 make ingest
 make quality
 ```
+
+Alternatively, trigger the `pipeline-run.yml` workflow from the GitHub Actions tab
+(requires `B2_KEY_ID` and `B2_APP_KEY` set as repository secrets).
 
 ---
 
@@ -284,6 +289,7 @@ configured via `ansible/vars/common.yml`. Local dev uses localhost stubs
 | `ci-data.yml` | Push/PR on `data/**`, `tests/**`, `docker/**` | ruff, black, unit tests, dbt compile, Docker builds, MinIO integration, Silver/Gold assertions, dbt run+test |
 | `ci-infra.yml` | Push/PR on `terraform/**`, `ansible/**`, `monitoring/**` | terraform fmt, terraform validate, tflint, ansible-lint, promtool rules, amtool check-config |
 | `cd-deploy.yml` | Push to `main` on `docker/**`, `data/ingestion/**` | Builds and pushes versioned images to ghcr.io |
+| `pipeline-run.yml` | Manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold against real Backblaze B2; requires `B2_KEY_ID` and `B2_APP_KEY` secrets |
 
 Pinned linting versions:
 
@@ -297,9 +303,10 @@ black==26.3.1
 - **OpenAQ v2 historical data:** The `/v2/measurements` endpoint returns HTTP 410
   for dates older than the platform's retention window. Integration tests and CI
   skip OpenAQ gracefully when this occurs. No synthetic fallback data is used.
-- **OCI storage auth:** The pipeline uses OCI Customer Secret Keys for S3-compat
-  access, which are separate from OCI API signing keys. Both must be created
-  before `terraform apply` and pipeline runs.
+- **B2 storage auth:** The pipeline uses Backblaze B2 Application Keys for
+  S3-compatible access. Create an Application Key at the Backblaze console and
+  set `B2_KEY_ID` / `B2_APP_KEY` as GitHub Actions secrets before triggering
+  `pipeline-run.yml`.
 - **node_exporter:** Shows as DOWN in local compose runs (no VM to scrape).
   UP in cloud deployments where node_exporter runs on the OCI VM.
 - **Local dev alerting:** `monitoring/alertmanager/alertmanager.yml` uses
