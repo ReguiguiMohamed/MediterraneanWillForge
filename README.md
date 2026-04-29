@@ -3,6 +3,7 @@
 [![CI — Data Pipeline](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/ci-data.yml/badge.svg)](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/ci-data.yml)
 [![CI — Infrastructure](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/ci-infra.yml/badge.svg)](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/ci-infra.yml)
 [![CD — Publish Images](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/cd-deploy.yml/badge.svg)](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/cd-deploy.yml)
+[![Pipeline Run](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/pipeline-run.yml/badge.svg)](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/pipeline-run.yml)
 
 Mediterranean Ops Fortress is a hybrid Data Engineering and DevOps portfolio
 project built around real Mediterranean air quality data. It ingests public API
@@ -91,7 +92,7 @@ mediterranean-ops-fortress/
 |   |-- ci-data.yml          # lint, unit tests, dbt compile, integration tests
 |   |-- ci-infra.yml         # terraform, ansible, prometheus, alertmanager checks
 |   |-- cd-deploy.yml        # ghcr.io image publishing
-|   `-- pipeline-run.yml     # manual run against real B2 (workflow_dispatch)
+|   `-- pipeline-run.yml     # daily cron + manual run against real B2
 |-- ansible/
 |   |-- site.yml
 |   |-- vars/common.yml
@@ -289,7 +290,7 @@ configured via `ansible/vars/common.yml`. Local dev uses localhost stubs
 | `ci-data.yml` | Push/PR on `data/**`, `tests/**`, `docker/**` | ruff, black, unit tests, dbt compile, Docker builds, MinIO integration, Silver/Gold assertions, dbt run+test |
 | `ci-infra.yml` | Push/PR on `terraform/**`, `ansible/**`, `monitoring/**` | terraform fmt, terraform validate, tflint, ansible-lint, promtool rules, amtool check-config |
 | `cd-deploy.yml` | Push to `main` on `docker/**`, `data/ingestion/**` | Builds and pushes versioned images to ghcr.io |
-| `pipeline-run.yml` | Manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold against real Backblaze B2; requires `B2_KEY_ID` and `B2_APP_KEY` secrets |
+| `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold against real Backblaze B2; supports single-date and date-range backfill; requires `B2_KEY_ID` and `B2_APP_KEY` secrets |
 
 Pinned linting versions:
 
