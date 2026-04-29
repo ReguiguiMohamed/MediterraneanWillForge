@@ -1,15 +1,19 @@
 """
 data/ingestion/bronze/openaq_ingestor.py
 ────────────────────────────────────────
-OpenAQ v2 station-observation ingestor.
+OpenAQ v3 station-observation ingestor.
 
-Pulls hourly PM2.5, PM10, NO2, and O3 readings from real monitoring
-stations across North Africa and the Mediterranean, aggregates to daily
-means per station, and writes a partitioned Delta Lake table to the
-bronze bucket on MinIO.
+Pulls pre-aggregated daily PM2.5, PM10, NO2, and O3 values from real
+monitoring stations across North Africa and the Mediterranean via the
+OpenAQ v3 REST API, and writes a partitioned Delta Lake table to the
+bronze bucket on Backblaze B2.
 
-API:  https://api.openaq.org/v2/measurements  (free, no auth required)
+API:  https://api.openaq.org/v3
 Docs: https://docs.openaq.org/
+
+Optional env var OPENAQ_API_KEY — register free at https://explore.openaq.org/register
+Without it the API enforces anonymous-tier rate limits; with a key, standard free-tier
+limits apply.
 """
 
 from __future__ import annotations
@@ -25,9 +29,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .base import BronzeIngestor, StorageConfig
 
-# ── Target countries ───────────────────────────────────────────────────────────
-# North African coastal + Eastern Mediterranean nations with measurable station
-# coverage in the OpenAQ network.
 TARGET_COUNTRIES: list[str] = [
     "TN",
     "DZ",
@@ -41,20 +42,25 @@ TARGET_COUNTRIES: list[str] = [
     "LB",
 ]
 
-_OPENAQ_BASE = "https://api.openaq.org/v2"
-_PARAMETERS = ["pm25", "pm10", "no2", "o3"]
-_PAGE_LIMIT = 1000  # max records per OpenAQ page
-_REQUEST_TIMEOUT = 45  # seconds
+_OPENAQ_BASE = "https://api.openaq.org/v3"
+_PAGE_LIMIT = 1000
+_REQUEST_TIMEOUT = 30  # seconds
 
-
-# ── Ingestor ───────────────────────────────────────────────────────────────────
+# OpenAQ v3 numeric parameter IDs → canonical Silver column names
+_PARAMETER_MAP: dict[int, str] = {
+    2: "pm2_5",
+    1: "pm10",
+    5: "nitrogen_dioxide",
+    3: "ozone",
+}
 
 
 class OpenAQIngestor(BronzeIngestor):
     """
-    Collects station-level observations from OpenAQ v2 for 10 Mediterranean /
-    North African countries, pivots long→wide, and writes daily-mean rows
-    (one per station × pollutant combination retained as columns).
+    Collects station-level observations from OpenAQ v3 for 10 Mediterranean /
+    North African countries. Fetches all locations (with embedded sensor metadata)
+    in one pass per country, retrieves pre-aggregated daily values per sensor,
+    pivots to wide format, and writes partitioned Delta Lake rows.
     """
 
     @property
@@ -65,106 +71,141 @@ class OpenAQIngestor(BronzeIngestor):
     def table_path(self) -> str:
         return f"s3://{self.storage.bronze_bucket}/openaq/air_quality"
 
+    def _headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {"Accept": "application/json"}
+        api_key = os.environ.get("OPENAQ_API_KEY", "").strip()
+        if api_key:
+            headers["X-API-Key"] = api_key
+        return headers
+
     def fetch(self, target_date: date) -> pd.DataFrame:
         date_from = f"{target_date.isoformat()}T00:00:00Z"
         date_to = f"{target_date.isoformat()}T23:59:59Z"
 
-        all_results: list[dict] = []
+        rows: list[dict] = []
         for country in TARGET_COUNTRIES:
-            for parameter in _PARAMETERS:
-                records = self._fetch_measurements(
-                    country, parameter, date_from, date_to
-                )
-                all_results.extend(records)
+            locations = self._fetch_locations(country)
+            for loc in locations:
+                rows.extend(self._collect_measurements(loc, date_from, date_to))
 
-        if not all_results:
+        if not rows:
             logger.warning(f"[openaq] No measurements returned for {target_date}.")
             return pd.DataFrame()
 
-        return self._build_dataframe(all_results, target_date)
+        return self._build_dataframe(rows, target_date)
+
+    def _fetch_locations(self, country: str) -> list[dict]:
+        """Page through /v3/locations for a country; return all locations."""
+        locations: list[dict] = []
+        page = 1
+        while True:
+            try:
+                data = self._get(
+                    f"{_OPENAQ_BASE}/locations",
+                    {"country": country, "limit": _PAGE_LIMIT, "page": page},
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[openaq] {country}: location page {page} failed — {exc}"
+                )
+                break
+            if data is None:
+                break
+            results = data.get("results", [])
+            locations.extend(results)
+            found = data.get("meta", {}).get("found", 0)
+            if not results or len(locations) >= found:
+                break
+            page += 1
+        logger.debug(f"[openaq] {country}: {len(locations)} locations")
+        return locations
+
+    def _collect_measurements(
+        self, loc: dict, date_from: str, date_to: str
+    ) -> list[dict]:
+        """Fetch the daily aggregated value for each target sensor on a location."""
+        coords = loc.get("coordinates") or {}
+        country_obj = loc.get("country") or {}
+
+        base = {
+            "station_id": str(loc.get("id")),
+            "station_name": loc.get("name"),
+            "city": loc.get("locality"),
+            "country_code": country_obj.get("code"),
+            "latitude": coords.get("latitude"),
+            "longitude": coords.get("longitude"),
+        }
+
+        rows: list[dict] = []
+        for sensor in loc.get("sensors") or []:
+            param = sensor.get("parameter") or {}
+            col_name = _PARAMETER_MAP.get(param.get("id"))
+            if col_name is None:
+                continue
+            value = self._fetch_daily_value(sensor["id"], date_from, date_to)
+            if value is None:
+                continue
+            rows.append({**base, "parameter": col_name, "value": value})
+
+        return rows
+
+    def _fetch_daily_value(
+        self, sensor_id: int, date_from: str, date_to: str
+    ) -> float | None:
+        """Retrieve the pre-aggregated daily mean from the sensor measurements endpoint."""
+        try:
+            data = self._get(
+                f"{_OPENAQ_BASE}/sensors/{sensor_id}/measurements/daily",
+                {"datetime_from": date_from, "datetime_to": date_to, "limit": 1},
+            )
+        except Exception as exc:
+            logger.debug(f"[openaq] Sensor {sensor_id}: fetch failed — {exc}")
+            return None
+        if not data:
+            return None
+        results = data.get("results", [])
+        if not results:
+            return None
+        val = results[0].get("value")
+        if val is None:
+            return None
+        fval = float(val)
+        return fval if fval >= 0 else None
 
     @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=30)
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=4, max=30),
     )
-    def _fetch_measurements(
-        self,
-        country: str,
-        parameter: str,
-        date_from: str,
-        date_to: str,
-    ) -> list[dict]:
-        """Fetch one page of measurements for a single country + parameter pair."""
-        params = {
-            "country": country,
-            "parameter": parameter,
-            "date_from": date_from,
-            "date_to": date_to,
-            "limit": _PAGE_LIMIT,
-            "page": 1,
-        }
-        headers = {"Accept": "application/json"}
-        try:
-            resp = requests.get(
-                f"{_OPENAQ_BASE}/measurements",
-                params=params,
-                headers=headers,
-                timeout=_REQUEST_TIMEOUT,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("results", [])
-        except requests.HTTPError as exc:
-            # 429 = rate limited; tenacity will retry
-            if exc.response is not None and exc.response.status_code == 429:
-                logger.warning(
-                    f"[openaq] Rate-limited on {country}/{parameter} — retrying."
-                )
-                time.sleep(2)
-                raise
-            logger.warning(
-                f"[openaq] HTTP {exc.response.status_code} for {country}/{parameter}: {exc}"
-            )
-            return []
-        except Exception as exc:
-            logger.warning(f"[openaq] Request failed for {country}/{parameter}: {exc}")
-            return []
+    def _get(self, url: str, params: dict) -> dict | None:
+        """HTTP GET. Returns None for 404/410; raises on 429 and 5xx so tenacity retries."""
+        resp = requests.get(
+            url, params=params, headers=self._headers(), timeout=_REQUEST_TIMEOUT
+        )
+        if resp.status_code in (404, 410):
+            return None
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", 30))
+            logger.warning(f"[openaq] Rate-limited — waiting {retry_after}s")
+            time.sleep(retry_after)
+        resp.raise_for_status()
+        return resp.json()
 
     @staticmethod
-    def _build_dataframe(results: list[dict], target_date: date) -> pd.DataFrame:
+    def _build_dataframe(rows: list[dict], target_date: date) -> pd.DataFrame:
         """
-        Flatten OpenAQ result dicts, aggregate hourly → daily mean per
-        (location, parameter), then pivot to wide format.
+        Pivot long rows (one per station × parameter) to wide format with one
+        column per pollutant. Averages any duplicates from pagination overlap.
         """
-        rows: list[dict] = []
-        for r in results:
-            coords = r.get("coordinates") or {}
-            rows.append(
-                {
-                    "station_id": r.get("locationId"),
-                    "station_name": r.get("location"),
-                    "city": r.get("city"),
-                    "country_code": r.get("country"),
-                    "latitude": coords.get("latitude"),
-                    "longitude": coords.get("longitude"),
-                    "parameter": r.get("parameter"),
-                    "value": r.get("value"),
-                    "unit": r.get("unit"),
-                }
-            )
+        df = pd.DataFrame(rows)
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["station_id", "parameter", "value"])
+        df = df[df["value"] >= 0]
 
-        df_long = pd.DataFrame(rows)
-
-        # Drop rows without a valid station or pollutant measurement
-        df_long = df_long.dropna(subset=["station_id", "parameter", "value"])
-        df_long["value"] = pd.to_numeric(df_long["value"], errors="coerce")
-        df_long = df_long[df_long["value"] >= 0]  # physical values are non-negative
-
-        if df_long.empty:
+        if df.empty:
             return pd.DataFrame()
 
-        # Aggregate to daily mean per station × parameter
         agg = (
-            df_long.groupby(
+            df.groupby(
                 [
                     "station_id",
                     "station_name",
@@ -181,7 +222,6 @@ class OpenAQIngestor(BronzeIngestor):
             .reset_index()
         )
 
-        # Pivot: one column per pollutant
         pivot = agg.pivot_table(
             index=[
                 "station_id",
@@ -195,18 +235,8 @@ class OpenAQIngestor(BronzeIngestor):
             values="value",
             aggfunc="first",
         ).reset_index()
-
-        # Normalise column names (pm25 → pm2_5 for consistency with Open-Meteo)
         pivot.columns.name = None
-        pivot = pivot.rename(
-            columns={
-                "pm25": "pm2_5",
-                "no2": "nitrogen_dioxide",
-                "o3": "ozone",
-            }
-        )
 
-        # Guarantee all pollutant columns exist even when no data was returned
         for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
             if col not in pivot.columns:
                 pivot[col] = None
@@ -216,14 +246,9 @@ class OpenAQIngestor(BronzeIngestor):
         pivot["partition_date"] = date_str
         pivot["ingestion_ts"] = pd.Timestamp.now(tz=timezone.utc).isoformat()
         pivot["source"] = "openaq"
-
-        # station_id must be a string for consistent Delta Lake schema
         pivot["station_id"] = pivot["station_id"].astype(str)
 
         return pivot
-
-
-# ── Module-level entry point ───────────────────────────────────────────────────
 
 
 def run(target_date: date | None = None) -> None:

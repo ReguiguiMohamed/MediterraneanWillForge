@@ -38,6 +38,7 @@ env:
   TARGET_DATE:                         ${{ inputs.target_date }}
   BACKFILL_START:                      ${{ inputs.backfill_start }}
   BACKFILL_END:                        ${{ inputs.backfill_end }}
+  OPENAQ_API_KEY:                      ${{ secrets.OPENAQ_API_KEY }}
 
 jobs:
   run-pipeline:

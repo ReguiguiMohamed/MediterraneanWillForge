@@ -23,7 +23,7 @@ The platform pulls two real public data sources:
 | Source | Data | Notes |
 |---|---|---|
 | Open-Meteo Air Quality API | CAMS-backed daily PM2.5, PM10, NO2, and O3 means for 12 Mediterranean city grid points | Free, no API key |
-| OpenAQ v2 | Station observations for TN, DZ, MA, LY, EG, TR, GR, ES, IT, and LB | Free public API; historical v2 measurement queries may return HTTP 410 |
+| OpenAQ v3 | Station observations for TN, DZ, MA, LY, EG, TR, GR, ES, IT, and LB | Free API; API key recommended (register free at openaq.org); daily aggregates via `/v3/sensors/{id}/measurements/daily` |
 
 The pipeline writes:
 
@@ -301,9 +301,11 @@ black==26.3.1
 
 ## Known Limitations
 
-- **OpenAQ v2 historical data:** The `/v2/measurements` endpoint returns HTTP 410
-  for dates older than the platform's retention window. Integration tests and CI
-  skip OpenAQ gracefully when this occurs. No synthetic fallback data is used.
+- **OpenAQ API key:** The `/v3/sensors/{id}/measurements/daily` endpoint works
+  without a key but enforces anonymous-tier rate limits. Set `OPENAQ_API_KEY` in
+  `.env` (or as a GitHub Actions secret) to use standard free-tier limits. Register
+  free at [explore.openaq.org/register](https://explore.openaq.org/register).
+  Integration tests skip OpenAQ gracefully when the ingestor returns 0 rows.
 - **B2 storage auth:** The pipeline uses Backblaze B2 Application Keys for
   S3-compatible access. Create an Application Key at the Backblaze console and
   set `B2_KEY_ID` / `B2_APP_KEY` as GitHub Actions secrets before triggering

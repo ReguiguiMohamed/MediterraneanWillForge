@@ -82,8 +82,8 @@ class TestCopernicusIngestor:
 class TestOpenAQIngestor:
     """End-to-end Bronze write tests for the OpenAQ ingestor.
 
-    OpenAQ v2 /v2/measurements returns HTTP 410 Gone for historical dates
-    (the endpoint is being sunset). When fetch() returns 0 rows the ingestor
+    OpenAQ v3 may return no measurements for a given historical date when
+    station coverage is absent. When fetch() returns 0 rows the ingestor
     correctly skips the Delta write; tests detect this and skip gracefully
     rather than crashing on a missing table.
     """
