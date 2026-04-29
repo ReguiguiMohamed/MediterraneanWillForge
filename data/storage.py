@@ -22,6 +22,6 @@ def delta_storage_options(
         "AWS_ACCESS_KEY_ID": access_key,
         "AWS_SECRET_ACCESS_KEY": secret_key,
         "AWS_REGION": region,
-        "AWS_ALLOW_HTTP": "true",
+        "AWS_ALLOW_HTTP": "true" if endpoint.startswith("http://") else "false",
         "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
     }

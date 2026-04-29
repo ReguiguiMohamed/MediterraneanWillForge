@@ -1,15 +1,29 @@
 name: Pipeline — Full Run (Bronze → Silver → Gold)
 
-# Manually triggered from the Actions tab.
 # Runs all three pipeline stages against real Backblaze B2 storage.
+# Triggers:
+#   - Daily at 06:00 UTC (cron)
+#   - Manually from the Actions tab (workflow_dispatch)
 # Required secrets: B2_KEY_ID, B2_APP_KEY
-# (Settings → Secrets and variables → Actions → New repository secret)
+# Backfill: set backfill_start + backfill_end to process a date range.
+#   Bronze loops over every date in the range; Silver and Gold run once
+#   after all Bronze dates are loaded (they are incremental).
 
 on:
+  schedule:
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       target_date:
         description: "Date to ingest (YYYY-MM-DD). Leave blank for yesterday."
+        required: false
+        default: ""
+      backfill_start:
+        description: "Backfill start (YYYY-MM-DD). Pair with backfill_end for a date range."
+        required: false
+        default: ""
+      backfill_end:
+        description: "Backfill end (YYYY-MM-DD, inclusive). Pair with backfill_start."
         required: false
         default: ""
 
@@ -22,6 +36,8 @@ env:
   AWS_REGION:                          eu-central-003
   PROMETHEUS_PUSHGATEWAY_URL:          http://localhost:9091
   TARGET_DATE:                         ${{ inputs.target_date }}
+  BACKFILL_START:                      ${{ inputs.backfill_start }}
+  BACKFILL_END:                        ${{ inputs.backfill_end }}
 
 jobs:
   run-pipeline:
@@ -42,29 +58,58 @@ jobs:
       - name: Install dependencies
         run: pip install -r docker/ingestion/requirements.txt
 
+      - name: Compute target dates
+        run: |
+          python - <<'EOF'
+          import os
+          from datetime import date, timedelta
+
+          start = os.environ.get("BACKFILL_START", "").strip()
+          end_s = os.environ.get("BACKFILL_END", "").strip()
+          td    = os.environ.get("TARGET_DATE", "").strip()
+
+          if start and end_s:
+              d, end_d, dates = date.fromisoformat(start), date.fromisoformat(end_s), []
+              while d <= end_d:
+                  dates.append(str(d))
+                  d += timedelta(days=1)
+          elif td:
+              dates = [td]
+          else:
+              dates = [str(date.today() - timedelta(days=1))]
+
+          print(f"Pipeline will process {len(dates)} date(s): {dates[0]} … {dates[-1]}")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"PIPELINE_DATES={' '.join(dates)}\n")
+          EOF
+
       - name: Bronze — Open-Meteo (12 Mediterranean cities)
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: |
-          python -c "
-          import os; from datetime import date
+          for d in $PIPELINE_DATES; do
+            echo "=== copernicus: $d ==="
+            python -c "
+          from datetime import date
           from data.ingestion.bronze.copernicus_ingestor import run
-          td = os.environ.get('TARGET_DATE', '')
-          run(date.fromisoformat(td) if td else None)
+          run(date.fromisoformat('$d'))
           "
+          done
 
       - name: Bronze — OpenAQ (10 Mediterranean / North African countries)
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: |
-          python -c "
-          import os; from datetime import date
+          for d in $PIPELINE_DATES; do
+            echo "=== openaq: $d ==="
+            python -c "
+          from datetime import date
           from data.ingestion.bronze.openaq_ingestor import run
-          td = os.environ.get('TARGET_DATE', '')
-          run(date.fromisoformat(td) if td else None)
+          run(date.fromisoformat('$d'))
           "
+          done
 
       - name: Silver — Transform (Bronze → Silver)
         env:
