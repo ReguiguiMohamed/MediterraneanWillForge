@@ -87,6 +87,7 @@ class OpenAQIngestor(BronzeIngestor):
             locations = self._fetch_locations(country)
             for loc in locations:
                 rows.extend(self._collect_measurements(loc, date_from, date_to))
+            time.sleep(2.0)  # let rate-limit window partially reset between countries
 
         if not rows:
             logger.warning(f"[openaq] No measurements returned for {target_date}.")
@@ -95,14 +96,19 @@ class OpenAQIngestor(BronzeIngestor):
         return self._build_dataframe(rows, target_date)
 
     def _fetch_locations(self, country: str) -> list[dict]:
-        """Page through /v3/locations for a country; return all locations."""
+        """Page through /v3/locations filtered to target parameters; return matching locations."""
         locations: list[dict] = []
         page = 1
         while True:
             try:
                 data = self._get(
                     f"{_OPENAQ_BASE}/locations",
-                    {"country": country, "limit": _PAGE_LIMIT, "page": page},
+                    {
+                        "country": country,
+                        "limit": _PAGE_LIMIT,
+                        "page": page,
+                        "parameters_id": list(_PARAMETER_MAP.keys()),
+                    },
                 )
             except Exception as exc:
                 logger.warning(
@@ -118,7 +124,7 @@ class OpenAQIngestor(BronzeIngestor):
             if not results or len(locations) >= found:
                 break
             page += 1
-        logger.debug(f"[openaq] {country}: {len(locations)} locations")
+        logger.debug(f"[openaq] {country}: {len(locations)} matching locations")
         return locations
 
     def _collect_measurements(
@@ -144,6 +150,7 @@ class OpenAQIngestor(BronzeIngestor):
             if col_name is None:
                 continue
             value = self._fetch_daily_value(sensor["id"], date_from, date_to)
+            time.sleep(0.5)  # stay within free-tier rate limit between sensor calls
             if value is None:
                 continue
             rows.append({**base, "parameter": col_name, "value": value})
