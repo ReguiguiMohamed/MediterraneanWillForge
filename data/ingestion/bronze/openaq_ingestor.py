@@ -43,7 +43,8 @@ TARGET_COUNTRIES: list[str] = [
 ]
 
 _OPENAQ_BASE = "https://api.openaq.org/v3"
-_PAGE_LIMIT = 1000
+# Hard cap per country — prevents rate-limit flooding on high-density countries (TN/DZ/MA)
+_MAX_LOCS_PER_COUNTRY = 50
 _REQUEST_TIMEOUT = 30  # seconds
 
 # OpenAQ v3 numeric parameter IDs → canonical Silver column names
@@ -96,35 +97,23 @@ class OpenAQIngestor(BronzeIngestor):
         return self._build_dataframe(rows, target_date)
 
     def _fetch_locations(self, country: str) -> list[dict]:
-        """Page through /v3/locations filtered to target parameters; return matching locations."""
-        locations: list[dict] = []
-        page = 1
-        while True:
-            try:
-                data = self._get(
-                    f"{_OPENAQ_BASE}/locations",
-                    {
-                        "country": country,
-                        "limit": _PAGE_LIMIT,
-                        "page": page,
-                        "parameters_id": list(_PARAMETER_MAP.keys()),
-                    },
-                )
-            except Exception as exc:
-                logger.warning(
-                    f"[openaq] {country}: location page {page} failed — {exc}"
-                )
-                break
-            if data is None:
-                break
-            results = data.get("results", [])
-            locations.extend(results)
-            found_raw = str(data.get("meta", {}).get("found", 0))
-            found = int(found_raw.lstrip(">").strip() or 0)
-            if not results or len(locations) >= found:
-                break
-            page += 1
-        logger.debug(f"[openaq] {country}: {len(locations)} matching locations")
+        """Fetch up to _MAX_LOCS_PER_COUNTRY locations with target sensors for a country."""
+        try:
+            data = self._get(
+                f"{_OPENAQ_BASE}/locations",
+                {
+                    "country": country,
+                    "limit": _MAX_LOCS_PER_COUNTRY,
+                    "parameters_id": list(_PARAMETER_MAP.keys()),
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"[openaq] {country}: location fetch failed — {exc}")
+            return []
+        if data is None:
+            return []
+        locations = data.get("results", [])
+        logger.debug(f"[openaq] {country}: {len(locations)} locations")
         return locations
 
     def _collect_measurements(
@@ -150,7 +139,7 @@ class OpenAQIngestor(BronzeIngestor):
             if col_name is None:
                 continue
             value = self._fetch_daily_value(sensor["id"], date_from, date_to)
-            time.sleep(0.5)  # stay within free-tier rate limit between sensor calls
+            time.sleep(1.2)  # ~50 req/min — stays within 60 req/min free-tier limit
             if value is None:
                 continue
             rows.append({**base, "parameter": col_name, "value": value})
