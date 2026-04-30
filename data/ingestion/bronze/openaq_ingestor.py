@@ -14,13 +14,19 @@ Docs: https://docs.openaq.org/
 Optional env var OPENAQ_API_KEY — register free at https://explore.openaq.org/register
 Without it the API enforces anonymous-tier rate limits; with a key, standard free-tier
 limits apply.
+
+Two ingestion modes:
+  run(target_date)          — single date; used by daily cron.
+  run_range(date_from, date_to) — full range in one API pass; used by backfill.
+    Each sensor is queried once with limit=N covering all N dates, reducing
+    API calls from (500 sensors × N dates) to (500 sensors × 1 call).
 """
 
 from __future__ import annotations
 
 import os
 import time
-from datetime import date, timezone
+from datetime import date, timedelta, timezone
 
 import pandas as pd
 import requests
@@ -59,9 +65,9 @@ _PARAMETER_MAP: dict[int, str] = {
 class OpenAQIngestor(BronzeIngestor):
     """
     Collects station-level observations from OpenAQ v3 for 10 Mediterranean /
-    North African countries. Fetches all locations (with embedded sensor metadata)
-    in one pass per country, retrieves pre-aggregated daily values per sensor,
-    pivots to wide format, and writes partitioned Delta Lake rows.
+    North African countries. Fetches up to _MAX_LOCS_PER_COUNTRY locations per
+    country, retrieves pre-aggregated daily values per sensor, pivots to wide
+    format, and writes partitioned Delta Lake rows to B2.
     """
 
     @property
@@ -78,6 +84,8 @@ class OpenAQIngestor(BronzeIngestor):
         if api_key:
             headers["X-API-Key"] = api_key
         return headers
+
+    # ── Single-date path (daily cron) ─────────────────────────────────────────
 
     def fetch(self, target_date: date) -> pd.DataFrame:
         date_from = f"{target_date.isoformat()}T00:00:00Z"
@@ -96,42 +104,11 @@ class OpenAQIngestor(BronzeIngestor):
 
         return self._build_dataframe(rows, target_date)
 
-    def _fetch_locations(self, country: str) -> list[dict]:
-        """Fetch up to _MAX_LOCS_PER_COUNTRY locations with target sensors for a country."""
-        try:
-            data = self._get(
-                f"{_OPENAQ_BASE}/locations",
-                {
-                    "country": country,
-                    "limit": _MAX_LOCS_PER_COUNTRY,
-                    "parameters_id": list(_PARAMETER_MAP.keys()),
-                },
-            )
-        except Exception as exc:
-            logger.warning(f"[openaq] {country}: location fetch failed — {exc}")
-            return []
-        if data is None:
-            return []
-        locations = data.get("results", [])
-        logger.debug(f"[openaq] {country}: {len(locations)} locations")
-        return locations
-
     def _collect_measurements(
         self, loc: dict, date_from: str, date_to: str
     ) -> list[dict]:
         """Fetch the daily aggregated value for each target sensor on a location."""
-        coords = loc.get("coordinates") or {}
-        country_obj = loc.get("country") or {}
-
-        base = {
-            "station_id": str(loc.get("id")),
-            "station_name": loc.get("name"),
-            "city": loc.get("locality"),
-            "country_code": country_obj.get("code"),
-            "latitude": coords.get("latitude"),
-            "longitude": coords.get("longitude"),
-        }
-
+        base = self._location_base(loc)
         rows: list[dict] = []
         for sensor in loc.get("sensors") or []:
             param = sensor.get("parameter") or {}
@@ -143,7 +120,6 @@ class OpenAQIngestor(BronzeIngestor):
             if value is None:
                 continue
             rows.append({**base, "parameter": col_name, "value": value})
-
         return rows
 
     def _fetch_daily_value(
@@ -169,6 +145,164 @@ class OpenAQIngestor(BronzeIngestor):
         fval = float(val)
         return fval if fval >= 0 else None
 
+    # ── Range path (backfill) ─────────────────────────────────────────────────
+
+    def run_range(self, date_from: date, date_to: date) -> None:
+        """
+        Fetch and write all dates in [date_from, date_to] in a single API pass.
+        Each sensor is queried once with limit=N returning all N daily values,
+        instead of N separate single-day queries.
+
+        Idempotent: dates already present in Bronze are skipped.
+        """
+        all_dates = [
+            date_from + timedelta(days=i) for i in range((date_to - date_from).days + 1)
+        ]
+        missing = [d for d in all_dates if not self._partition_exists(d)]
+
+        if not missing:
+            logger.info("[openaq] All partitions in range already present — skipping.")
+            return
+
+        skipped = len(all_dates) - len(missing)
+        logger.info(
+            f"[openaq] Range ingest {date_from} → {date_to}: "
+            f"{len(missing)} date(s) to fetch, {skipped} already present"
+        )
+
+        fetch_from = f"{min(missing).isoformat()}T00:00:00Z"
+        fetch_to = f"{max(missing).isoformat()}T23:59:59Z"
+        num_days = (max(missing) - min(missing)).days + 1
+
+        t0 = time.monotonic()
+        df = self._fetch_range(fetch_from, fetch_to, num_days)
+
+        if df.empty:
+            logger.warning(f"[openaq] No measurements for range {date_from}–{date_to}.")
+            return
+
+        # Drop any dates the API returned that are already in Bronze
+        missing_strs = {d.isoformat() for d in missing}
+        df = df[df["partition_date"].isin(missing_strs)]
+
+        if df.empty:
+            logger.warning("[openaq] No new data after filtering existing partitions.")
+            return
+
+        self._write(df)
+        elapsed = time.monotonic() - t0
+        self._push_metrics(len(df), elapsed)
+        logger.success(
+            f"[openaq] Range ingest complete — {len(df)} rows across "
+            f"{df['partition_date'].nunique()} date(s) in {elapsed:.1f}s"
+        )
+
+    def _fetch_range(self, date_from: str, date_to: str, num_days: int) -> pd.DataFrame:
+        """One API pass over all countries; each sensor call covers the full range."""
+        rows: list[dict] = []
+        for country in TARGET_COUNTRIES:
+            locations = self._fetch_locations(country)
+            for loc in locations:
+                rows.extend(
+                    self._collect_measurements_range(loc, date_from, date_to, num_days)
+                )
+            time.sleep(2.0)
+
+        if not rows:
+            return pd.DataFrame()
+        return self._build_dataframe_range(rows)
+
+    def _collect_measurements_range(
+        self, loc: dict, date_from: str, date_to: str, num_days: int
+    ) -> list[dict]:
+        """Fetch daily values for each target sensor across the full date range."""
+        base = self._location_base(loc)
+        rows: list[dict] = []
+        for sensor in loc.get("sensors") or []:
+            param = sensor.get("parameter") or {}
+            col_name = _PARAMETER_MAP.get(param.get("id"))
+            if col_name is None:
+                continue
+            day_values = self._fetch_daily_range(
+                sensor["id"], date_from, date_to, num_days
+            )
+            time.sleep(1.2)
+            for date_str, value in day_values:
+                rows.append(
+                    {**base, "parameter": col_name, "value": value, "date": date_str}
+                )
+        return rows
+
+    def _fetch_daily_range(
+        self, sensor_id: int, date_from: str, date_to: str, num_days: int
+    ) -> list[tuple[str, float]]:
+        """
+        Retrieve daily aggregates for a sensor over a date range in one call.
+        Returns a list of (YYYY-MM-DD, value) tuples for days that have data.
+        """
+        try:
+            data = self._get(
+                f"{_OPENAQ_BASE}/sensors/{sensor_id}/measurements/daily",
+                {"datetime_from": date_from, "datetime_to": date_to, "limit": num_days},
+            )
+        except Exception as exc:
+            logger.debug(f"[openaq] Sensor {sensor_id}: range fetch failed — {exc}")
+            return []
+        if not data:
+            return []
+        out: list[tuple[str, float]] = []
+        for r in data.get("results") or []:
+            val = r.get("value")
+            if val is None:
+                continue
+            fval = float(val)
+            if fval < 0:
+                continue
+            # Extract date from period.datetimeFrom.utc; fall back to datetime.utc
+            period = r.get("period") or {}
+            dt_utc = (period.get("datetimeFrom") or {}).get("utc", "")
+            if not dt_utc:
+                dt_utc = (r.get("datetime") or {}).get("utc", "")
+            if not dt_utc:
+                continue
+            out.append((dt_utc[:10], fval))
+        return out
+
+    # ── Shared helpers ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _location_base(loc: dict) -> dict:
+        coords = loc.get("coordinates") or {}
+        country_obj = loc.get("country") or {}
+        return {
+            "station_id": str(loc.get("id")),
+            "station_name": loc.get("name"),
+            "city": loc.get("locality"),
+            "country_code": country_obj.get("code"),
+            "latitude": coords.get("latitude"),
+            "longitude": coords.get("longitude"),
+        }
+
+    def _fetch_locations(self, country: str) -> list[dict]:
+        """Fetch up to _MAX_LOCS_PER_COUNTRY locations with target sensors for a country."""
+        try:
+            data = self._get(
+                f"{_OPENAQ_BASE}/locations",
+                {
+                    "country": country,
+                    "limit": _MAX_LOCS_PER_COUNTRY,
+                    "parameters_id": list(_PARAMETER_MAP.keys()),
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"[openaq] {country}: location fetch failed — {exc}")
+            return []
+        if data is None:
+            return []
+        locations = data.get("results", [])
+        logger.debug(f"[openaq] {country}: {len(locations)} locations")
+        return locations
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=4, max=30),
@@ -189,10 +323,7 @@ class OpenAQIngestor(BronzeIngestor):
 
     @staticmethod
     def _build_dataframe(rows: list[dict], target_date: date) -> pd.DataFrame:
-        """
-        Pivot long rows (one per station × parameter) to wide format with one
-        column per pollutant. Averages any duplicates from pagination overlap.
-        """
+        """Pivot single-date long rows to wide format (one row per station)."""
         df = pd.DataFrame(rows)
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
         df = df.dropna(subset=["station_id", "parameter", "value"])
@@ -247,12 +378,76 @@ class OpenAQIngestor(BronzeIngestor):
 
         return pivot
 
+    @staticmethod
+    def _build_dataframe_range(rows: list[dict]) -> pd.DataFrame:
+        """Pivot multi-date long rows to wide format (one row per station × date)."""
+        df = pd.DataFrame(rows)
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["station_id", "parameter", "value", "date"])
+        df = df[df["value"] >= 0]
+
+        if df.empty:
+            return pd.DataFrame()
+
+        agg = (
+            df.groupby(
+                [
+                    "station_id",
+                    "station_name",
+                    "city",
+                    "country_code",
+                    "latitude",
+                    "longitude",
+                    "date",
+                    "parameter",
+                ],
+                dropna=False,
+            )["value"]
+            .mean()
+            .round(4)
+            .reset_index()
+        )
+
+        pivot = agg.pivot_table(
+            index=[
+                "station_id",
+                "station_name",
+                "city",
+                "country_code",
+                "latitude",
+                "longitude",
+                "date",
+            ],
+            columns="parameter",
+            values="value",
+            aggfunc="first",
+        ).reset_index()
+        pivot.columns.name = None
+
+        for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
+            if col not in pivot.columns:
+                pivot[col] = None
+
+        pivot["partition_date"] = pivot["date"]
+        pivot["ingestion_ts"] = pd.Timestamp.now(tz=timezone.utc).isoformat()
+        pivot["source"] = "openaq"
+        pivot["station_id"] = pivot["station_id"].astype(str)
+
+        return pivot
+
 
 def run(target_date: date | None = None) -> None:
     """Convenience wrapper; used by Docker CMD and integration tests."""
     storage = StorageConfig.from_env()
     pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
     OpenAQIngestor(storage, pushgateway).run(target_date)
+
+
+def run_range(date_from: date, date_to: date) -> None:
+    """Convenience wrapper for backfill; fetches all dates in one API pass."""
+    storage = StorageConfig.from_env()
+    pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
+    OpenAQIngestor(storage, pushgateway).run_range(date_from, date_to)
 
 
 if __name__ == "__main__":

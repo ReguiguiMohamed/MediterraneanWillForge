@@ -103,14 +103,26 @@ jobs:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: |
-          for d in $PIPELINE_DATES; do
-            echo "=== openaq: $d ==="
-            python -c "
+          python - <<'EOF'
+          import os
           from datetime import date
-          from data.ingestion.bronze.openaq_ingestor import run
-          run(date.fromisoformat('$d'))
-          "
-          done
+          from data.ingestion.bronze.openaq_ingestor import run, run_range
+
+          start = os.environ.get("BACKFILL_START", "").strip()
+          end_s = os.environ.get("BACKFILL_END", "").strip()
+          td    = os.environ.get("TARGET_DATE", "").strip()
+
+          if start and end_s:
+              # Backfill: one API pass for the full range — 500 sensor calls total
+              # instead of 500 × N calls. Reduces 30-day backfill from ~16h to ~20min.
+              print(f"=== openaq: range {start} → {end_s} ===")
+              run_range(date.fromisoformat(start), date.fromisoformat(end_s))
+          elif td:
+              print(f"=== openaq: {td} ===")
+              run(date.fromisoformat(td))
+          else:
+              run()
+          EOF
 
       - name: Silver — Transform (Bronze → Silver)
         env:
