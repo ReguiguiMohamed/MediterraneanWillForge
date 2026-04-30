@@ -113,7 +113,8 @@ class OpenAQIngestor(BronzeIngestor):
                 break
             results = data.get("results", [])
             locations.extend(results)
-            found = int(data.get("meta", {}).get("found", 0))
+            found_raw = str(data.get("meta", {}).get("found", 0))
+            found = int(found_raw.lstrip(">").strip() or 0)
             if not results or len(locations) >= found:
                 break
             page += 1
