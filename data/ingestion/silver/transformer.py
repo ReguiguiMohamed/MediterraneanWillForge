@@ -384,9 +384,13 @@ def run() -> None:
             f"[{source}] Processing {len(partitions)} new partition(s): {partitions}"
         )
 
+        # Open the Bronze table once for the whole source loop — each DeltaTable()
+        # call lists and GETs the _delta_log/ on B2 (Class B transactions). Opening
+        # it per-partition in a 29-date backfill burned through the 2,500/day free cap.
+        bronze_dt = DeltaTable(bronze_path, storage_options=cfg.storage_options)
+
         for partition in partitions:
             try:
-                bronze_dt = DeltaTable(bronze_path, storage_options=cfg.storage_options)
                 raw_df = bronze_dt.to_pandas(
                     filters=[("partition_date", "=", partition)]
                 )
