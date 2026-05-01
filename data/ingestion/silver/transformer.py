@@ -45,6 +45,7 @@ from datetime import timezone
 import numpy as np
 import pandas as pd
 from deltalake import DeltaTable, write_deltalake
+from deltalake.exceptions import TableNotFoundError
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
@@ -300,8 +301,10 @@ def _unprocessed_partitions(
     try:
         bronze_dt = DeltaTable(bronze_path, storage_options=storage_options)
         bronze_dates = _dates_from_files(bronze_dt.files())
-    except Exception as exc:
-        logger.warning(f"[{source}] Cannot read Bronze table at {bronze_path}: {exc}")
+    except TableNotFoundError:
+        logger.warning(
+            f"[{source}] Bronze table not found at {bronze_path} — nothing to process."
+        )
         return []
 
     if not bronze_dates:
@@ -314,7 +317,7 @@ def _unprocessed_partitions(
         silver_dt = DeltaTable(silver_path, storage_options=storage_options)
         silver_source_files = [f for f in silver_dt.files() if f"source={source}" in f]
         silver_dates = _dates_from_files(silver_source_files)
-    except Exception:
+    except TableNotFoundError:
         silver_dates = set()
 
     return sorted(bronze_dates - silver_dates)
@@ -384,10 +387,15 @@ def run() -> None:
             f"[{source}] Processing {len(partitions)} new partition(s): {partitions}"
         )
 
-        # Open the Bronze table once for the whole source loop — each DeltaTable()
-        # call lists and GETs the _delta_log/ on B2 (Class B transactions). Opening
-        # it per-partition in a 29-date backfill burned through the 2,500/day free cap.
+        # Open Bronze once — each DeltaTable() call reads the _delta_log/ from B2
+        # (Class B transactions). One open per source covers all partitions.
         bronze_dt = DeltaTable(bronze_path, storage_options=cfg.storage_options)
+
+        # Collect all transformed frames before writing — then one write_deltalake()
+        # call per source instead of one per partition. write_deltalake() opens the
+        # Silver Delta log internally on every call; batching cuts N log-reads to 1.
+        batch_frames: list[pd.DataFrame] = []
+        batch_partitions: list[str] = []
 
         for partition in partitions:
             try:
@@ -412,24 +420,37 @@ def run() -> None:
                     continue
 
                 enriched = _canonicalize_for_delta(enriched)
+                batch_frames.append(enriched)
+                batch_partitions.append(partition)
+                logger.info(
+                    f"[{source}] Partition {partition}: {len(enriched)} rows prepared."
+                )
 
+            except Exception as exc:
+                failures.append(f"{source}/{partition}: {exc}")
+                logger.error(f"[{source}] Partition {partition} failed: {exc}")
+
+        if batch_frames:
+            try:
+                batch_df = pd.concat(batch_frames, ignore_index=True)
                 write_deltalake(
                     silver_path,
-                    enriched,
+                    batch_df,
                     mode="append",
                     engine="rust",
                     partition_by=["partition_date", "source"],
                     storage_options=cfg.storage_options,
                     schema_mode="merge",
                 )
-                total_rows += len(enriched)
+                total_rows += len(batch_df)
                 logger.info(
-                    f"[{source}] Partition {partition}: {len(enriched)} rows → Silver."
+                    f"[{source}] Wrote {len(batch_df)} rows "
+                    f"({len(batch_frames)} partition(s)) → Silver."
                 )
-
             except Exception as exc:
-                failures.append(f"{source}/{partition}: {exc}")
-                logger.error(f"[{source}] Partition {partition} failed: {exc}")
+                for p in batch_partitions:
+                    failures.append(f"{source}/{p}: batch write failed — {exc}")
+                logger.error(f"[{source}] Batch write failed: {exc}")
 
         rows_gauge.labels(layer="silver", source=source).set(total_rows)
 

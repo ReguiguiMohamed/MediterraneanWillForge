@@ -25,6 +25,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 from deltalake import DeltaTable, write_deltalake
+from deltalake.exceptions import TableNotFoundError
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
@@ -153,7 +154,7 @@ class BronzeIngestor(ABC):
         try:
             dt = DeltaTable(self.table_path, storage_options=self.storage.options)
             return any(prefix in f for f in dt.files())
-        except Exception:
+        except TableNotFoundError:
             return False
 
     def _write(self, df: pd.DataFrame) -> None:
