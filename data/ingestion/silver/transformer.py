@@ -49,6 +49,7 @@ from deltalake.exceptions import TableNotFoundError
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
+from data.metrics import push_to_grafana
 from data.storage import delta_storage_options
 
 # ── WHO 2021 24-hour guideline thresholds (µg/m³) ─────────────────────────────
@@ -472,6 +473,7 @@ def run() -> None:
         )
     except Exception as exc:
         logger.warning(f"Pushgateway push failed (best-effort): {exc}")
+    push_to_grafana(reg, job="med_ops_silver_transform")
 
     if failures:
         raise RuntimeError(

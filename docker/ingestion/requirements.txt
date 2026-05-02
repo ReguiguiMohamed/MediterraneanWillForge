@@ -17,6 +17,7 @@ pydantic==2.7.4
 
 # ── Observability ─────────────────────────────────────────────────────────────
 prometheus-client==0.20.0
+python-snappy==0.7.3      # raw Snappy compression for Prometheus remote_write
 
 # ── dbt ───────────────────────────────────────────────────────────────────────
 dbt-duckdb==1.8.0      # dbt-core bundled; DuckDB adapter with httpfs + delta

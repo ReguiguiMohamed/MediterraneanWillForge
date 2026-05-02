@@ -30,6 +30,7 @@ from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
+from data.metrics import push_to_grafana
 from data.storage import delta_storage_options
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -227,6 +228,7 @@ def run() -> None:
         push_to_gateway(pushgateway, job="med_ops_gold_mart", registry=reg)
     except Exception as exc:
         logger.warning(f"Pushgateway push failed (best-effort): {exc}")
+    push_to_grafana(reg, job="med_ops_gold_mart")
     logger.success(f"Gold marts complete — {total_rows} total rows, {elapsed:.1f}s")
 
 

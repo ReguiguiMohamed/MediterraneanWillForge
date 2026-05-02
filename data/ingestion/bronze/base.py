@@ -29,6 +29,7 @@ from deltalake.exceptions import TableNotFoundError
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
+from data.metrics import push_to_grafana
 from data.storage import delta_storage_options
 
 # ── Storage configuration ──────────────────────────────────────────────────────
@@ -138,6 +139,7 @@ class BronzeIngestor(ABC):
             logger.warning(
                 f"[{self.source_name}] Pushgateway unavailable — metrics not pushed: {exc}"
             )
+        push_to_grafana(self._registry, job=f"med_ops_bronze_{self.source_name}")
 
     # ── Delta Lake helpers ────────────────────────────────────────────────────
 
