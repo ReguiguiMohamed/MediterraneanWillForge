@@ -22,6 +22,9 @@ python-snappy==0.7.3      # raw Snappy compression for Prometheus remote_write
 # ── dbt ───────────────────────────────────────────────────────────────────────
 dbt-duckdb==1.8.0      # dbt-core bundled; DuckDB adapter with httpfs + delta
 
+# ── Machine learning ──────────────────────────────────────────────────────────
+scikit-learn==1.5.0   # Isolation Forest anomaly detection on Silver PM2.5/O3
+
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv==1.0.1
 loguru==0.7.2

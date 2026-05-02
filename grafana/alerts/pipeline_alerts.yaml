@@ -1,0 +1,119 @@
+# Grafana Cloud — Managed Alert Rules
+# Import via: mohamedwillforge.grafana.net → Alerting → Alert rules → Import
+#
+# Three rules covering the most critical pipeline failure modes:
+#   1. Pipeline stale  — no successful run in >25 hours
+#   2. OpenAQ silent   — Bronze OpenAQ returned 0 rows (rate-limit or API outage)
+#   3. Quality failure — any data quality check fired
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: med-ops-pipeline
+    folder: Mediterranean Ops
+    interval: 1h
+    rules:
+
+      - uid: med-ops-pipeline-stale
+        title: "Pipeline stale — no run in >25h"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 90000, to: 0 }
+            datasourceUid: "${DS_PROMETHEUS}"
+            model:
+              expr: time() - pipeline_last_successful_run_timestamp{layer="bronze"}
+              refId: A
+              instant: true
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              refId: C
+              conditions:
+                - evaluator: { params: [90000], type: gt }
+                  operator:  { type: and }
+                  query:     { params: [A] }
+                  reducer:   { params: [], type: last }
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 0s
+        annotations:
+          summary: "Pipeline has not run successfully in over 25 hours."
+          description: >
+            The Bronze layer timestamp shows no successful run for
+            {{ humanizeDuration $value }}. Expected cadence is 06:00 UTC daily.
+            Check the pipeline-run workflow in GitHub Actions.
+        labels:
+          severity: critical
+          team: data
+
+      - uid: med-ops-openaq-silent
+        title: "Bronze OpenAQ — 0 rows written"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: "${DS_PROMETHEUS}"
+            model:
+              expr: pipeline_ingested_rows{layer="bronze", source="openaq"}
+              refId: A
+              instant: true
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              refId: C
+              conditions:
+                - evaluator: { params: [1], type: lt }
+                  operator:  { type: and }
+                  query:     { params: [A] }
+                  reducer:   { params: [], type: last }
+        noDataState: NoData
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "OpenAQ Bronze ingestor wrote 0 rows."
+          description: >
+            The OpenAQ v3 ingestor returned 0 rows. This can indicate
+            API rate-limiting, an outage on the OpenAQ side, or a
+            change in the v3 sensor daily-aggregation availability.
+            Low row counts (< 5) are normal; zero rows are not.
+        labels:
+          severity: warning
+          team: data
+
+      - uid: med-ops-quality-failure
+        title: "Data quality check failure"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: "${DS_PROMETHEUS}"
+            model:
+              expr: sum(pipeline_quality_check_failures_total)
+              refId: A
+              instant: true
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              refId: C
+              conditions:
+                - evaluator: { params: [0], type: gt }
+                  operator:  { type: and }
+                  query:     { params: [A] }
+                  reducer:   { params: [], type: last }
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "{{ $value }} quality check failure(s) detected."
+          description: >
+            pipeline_quality_check_failures_total is non-zero.
+            Check the run_checks.py output in the pipeline run logs
+            to identify which check failed and which layer is affected.
+        labels:
+          severity: warning
+          team: data
