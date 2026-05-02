@@ -89,3 +89,5 @@ logs/
 secrets/
 credentials/
 CHECKPOINT.md
+checkpoint.md
+next_iterations.md
