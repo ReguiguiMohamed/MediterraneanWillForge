@@ -442,6 +442,14 @@ def run() -> None:
                     storage_options=cfg.storage_options,
                     schema_mode="merge",
                 )
+                try:
+                    DeltaTable(
+                        silver_path, storage_options=cfg.storage_options
+                    ).create_checkpoint()
+                except Exception as exc:
+                    logger.warning(
+                        f"[{source}] Silver Delta checkpoint failed (non-fatal): {exc}"
+                    )
                 total_rows += len(batch_df)
                 logger.info(
                     f"[{source}] Wrote {len(batch_df)} rows "

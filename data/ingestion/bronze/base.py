@@ -168,6 +168,14 @@ class BronzeIngestor(ABC):
             schema_mode="merge",
             engine="rust",
         )
+        try:
+            DeltaTable(
+                self.table_path, storage_options=self.storage.options
+            ).create_checkpoint()
+        except Exception as exc:
+            logger.warning(
+                f"[{self.source_name}] Delta checkpoint failed (non-fatal): {exc}"
+            )
 
     # ── Entry point ───────────────────────────────────────────────────────────
 

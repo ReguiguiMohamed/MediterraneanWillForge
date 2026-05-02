@@ -182,26 +182,38 @@ def run() -> None:
 
     # ── daily_country_summary ─────────────────────────────────────────────────
     summary = build_daily_country_summary(silver_df)
+    _summary_path = f"s3://{gold_bucket}/daily_country_summary"
     write_deltalake(
-        f"s3://{gold_bucket}/daily_country_summary",
+        _summary_path,
         summary,
         mode="overwrite",
         engine="rust",
         storage_options=storage_opts,
         schema_mode="overwrite",
     )
+    try:
+        DeltaTable(_summary_path, storage_options=storage_opts).create_checkpoint()
+    except Exception as exc:
+        logger.warning(
+            f"Gold daily_country_summary checkpoint failed (non-fatal): {exc}"
+        )
     logger.info(f"Gold daily_country_summary: {len(summary)} rows written.")
 
     # ── wildfire_risk_index ───────────────────────────────────────────────────
     risk = build_wildfire_risk_index(silver_df)
+    _risk_path = f"s3://{gold_bucket}/wildfire_risk_index"
     write_deltalake(
-        f"s3://{gold_bucket}/wildfire_risk_index",
+        _risk_path,
         risk,
         mode="overwrite",
         engine="rust",
         storage_options=storage_opts,
         schema_mode="overwrite",
     )
+    try:
+        DeltaTable(_risk_path, storage_options=storage_opts).create_checkpoint()
+    except Exception as exc:
+        logger.warning(f"Gold wildfire_risk_index checkpoint failed (non-fatal): {exc}")
     logger.info(f"Gold wildfire_risk_index: {len(risk)} rows written.")
 
     total_rows = len(summary) + len(risk)
