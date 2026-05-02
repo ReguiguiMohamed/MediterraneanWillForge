@@ -5,6 +5,9 @@ name: Pipeline — Full Run (Bronze → Silver → Gold)
 #   - Daily at 06:00 UTC (cron)
 #   - Manually from the Actions tab (workflow_dispatch)
 # Required secrets: B2_KEY_ID, B2_APP_KEY
+# Optional secrets: GRAFANA_REMOTE_WRITE_URL, GRAFANA_METRICS_ID, GRAFANA_TOKEN
+#   When all three are set, metrics are pushed to Grafana Cloud after each stage.
+#   If any are missing the pipeline runs normally without metrics push.
 # Backfill: set backfill_start + backfill_end to process a date range.
 #   Bronze loops over every date in the range; Silver and Gold run once
 #   after all Bronze dates are loaded (they are incremental).
@@ -39,6 +42,9 @@ env:
   BACKFILL_START:                      ${{ inputs.backfill_start }}
   BACKFILL_END:                        ${{ inputs.backfill_end }}
   OPENAQ_API_KEY:                      ${{ secrets.OPENAQ_API_KEY }}
+  GRAFANA_REMOTE_WRITE_URL:            ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
+  GRAFANA_METRICS_ID:                  ${{ secrets.GRAFANA_METRICS_ID }}
+  GRAFANA_TOKEN:                       ${{ secrets.GRAFANA_TOKEN }}
 
 jobs:
   run-pipeline:
@@ -58,6 +64,70 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r docker/ingestion/requirements.txt
+
+      - name: Verify secrets
+        run: |
+          python - <<'EOF'
+          import os, sys, base64, requests
+
+          # ── B2 secrets (required) ──────────────────────────────────────────────
+          b2_id  = os.environ.get("MINIO_ACCESS_KEY", "").strip()
+          b2_key = os.environ.get("MINIO_SECRET_KEY", "").strip()
+          b2_missing = [k for k, v in {"B2_KEY_ID": b2_id, "B2_APP_KEY": b2_key}.items() if not v]
+          if b2_missing:
+              print(f"::error::Required B2 secret(s) not set: {', '.join(b2_missing)}")
+              sys.exit(1)
+          print("B2 secrets: present")
+
+          # ── Grafana secrets (optional — skip push if absent, fail if partial) ──
+          g_url = os.environ.get("GRAFANA_REMOTE_WRITE_URL", "").strip()
+          g_uid = os.environ.get("GRAFANA_METRICS_ID", "").strip()
+          g_tok = os.environ.get("GRAFANA_TOKEN", "").strip()
+          grafana_vars = {"GRAFANA_REMOTE_WRITE_URL": g_url, "GRAFANA_METRICS_ID": g_uid, "GRAFANA_TOKEN": g_tok}
+          set_vars   = [k for k, v in grafana_vars.items() if v]
+          unset_vars = [k for k, v in grafana_vars.items() if not v]
+
+          if not set_vars:
+              print("Grafana secrets: not configured — metrics push disabled")
+              sys.exit(0)
+
+          if unset_vars:
+              print(f"::error::Grafana partially configured. Set all three or none.")
+              print(f"::error::Missing: {', '.join(unset_vars)}")
+              sys.exit(1)
+
+          # All three set — verify credentials with a live probe
+          creds = base64.b64encode(f"{g_uid}:{g_tok}".encode()).decode()
+          try:
+              resp = requests.post(
+                  g_url,
+                  data=b"",
+                  headers={"Authorization": f"Basic {creds}", "Content-Type": "application/x-protobuf"},
+                  timeout=10,
+              )
+          except requests.exceptions.ConnectionError as exc:
+              print(f"::error::Cannot reach Grafana remote_write URL: {exc}")
+              sys.exit(1)
+          except requests.exceptions.Timeout:
+              print(f"::error::Grafana remote_write URL timed out after 10s — check GRAFANA_REMOTE_WRITE_URL")
+              sys.exit(1)
+
+          if resp.status_code == 401:
+              print("::error::Grafana credentials rejected (401). Check GRAFANA_METRICS_ID and GRAFANA_TOKEN.")
+              sys.exit(1)
+          if resp.status_code == 403:
+              print("::error::Grafana token lacks required scope (403). Token needs 'metrics:write'.")
+              sys.exit(1)
+          if resp.status_code not in (200, 204, 400, 415, 422):
+              print(f"::error::Unexpected response from Grafana: HTTP {resp.status_code} — {resp.text[:300]}")
+              sys.exit(1)
+
+          # 400/415/422 = body format rejected but auth passed — credentials valid
+          print(f"Grafana credentials: verified (HTTP {resp.status_code})")
+          EOF
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
 
       - name: Compute target dates
         run: |
