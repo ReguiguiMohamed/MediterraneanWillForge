@@ -11,10 +11,10 @@ from public APIs only.
 flowchart TD
     subgraph sources["Data Sources"]
         OM["Open-Meteo Air Quality API\n12 Mediterranean cities\nCAMS-backed gridded model"]
-        OA["OpenAQ v2\nStation observations\n10 North African / Mediterranean countries"]
+        OA["OpenAQ v3\nStation observations\n10 North African / Mediterranean countries"]
     end
 
-    subgraph lake["Delta Lake on MinIO"]
+    subgraph lake["Delta Lake on Backblaze B2 (MinIO in local dev)"]
         BR["Bronze\ns3://bronze/openmeteo/air_quality\ns3://bronze/openaq/air_quality"]
         SI["Silver\ns3://silver/air_quality\ncanonical schema + WHO flags"]
         GO["Gold\ns3://gold/daily_country_summary\ns3://gold/wildfire_risk_index"]
@@ -61,8 +61,10 @@ Gold Delta marts
   daily_country_summary                country/source aggregates + WHO pct
   wildfire_risk_index                  composite O3 + PM2.5 risk score
 
-OpenAQ v2 API
+OpenAQ v3 API
   station observations for TN, DZ, MA, LY, EG, TR, GR, ES, IT, LB
+  two-phase fetch: /v3/locations per country → /v3/sensors/{id}/measurements/daily
+  range mode: single API pass covers N dates (backfill-efficient)
         |
         `-- same Bronze -> Silver -> Gold path
 ```
@@ -216,6 +218,12 @@ Webhook receivers default to `localhost:5001` placeholders. Override via
 | `ci-infra.yml` | `terraform/**`, `ansible/**`, `monitoring/**` | Terraform format+validate+tflint, Ansible lint, promtool rule checks, amtool check-config |
 | `cd-deploy.yml` | `docker/**`, `data/ingestion/**` on `main` | Builds and pushes versioned images to ghcr.io |
 
-The data pipeline CI uses real upstream APIs. OpenAQ v2 may return HTTP 410 for
-historical measurement queries; tests skip cleanly when that upstream behavior
-leaves no OpenAQ Bronze table to inspect.
+The data pipeline CI uses real upstream APIs. OpenAQ v3 returns no data for most
+station/date combinations (upstream sparsity — pre-aggregated daily values are
+absent for recent dates on the majority of stations). Tests skip cleanly when the
+ingestor returns 0 rows and no Bronze table is created.
+
+`pipeline-run.yml` runs against real Backblaze B2. It supports both single-date
+(daily cron at 06:00 UTC) and date-range backfill modes via `backfill_start` /
+`backfill_end` inputs. Backfills over ~20 dates should be split across days to
+stay within the B2 free-tier Class B transaction cap (2,500/day).

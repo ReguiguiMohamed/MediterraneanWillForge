@@ -44,7 +44,7 @@ observability model.
 ```text
 Open-Meteo ----\
                 +--> Bronze --> Silver --> Gold
-OpenAQ v2 ----/                    |
+OpenAQ v3 ----/                    |
                                    +--> dbt models
         Backblaze B2 (Delta Lake / S3-compat)
 
@@ -157,7 +157,10 @@ cd mediterranean-ops-fortress
 cp .env.example .env
 ```
 
-No API keys are required. Both Open-Meteo and OpenAQ v2 are free public APIs.
+Open-Meteo requires no API key. An OpenAQ API key is optional but recommended
+(anonymous tier has very low rate limits). Register free at
+[explore.openaq.org/register](https://explore.openaq.org/register) and set
+`OPENAQ_API_KEY` in your `.env`.
 
 ---
 
@@ -301,15 +304,30 @@ black==26.3.1
 
 ## Known Limitations
 
+- **OpenAQ v3 data sparsity:** The ingestor fetches up to 50 stations per
+  country (hard cap to prevent rate-limit flooding on high-density countries
+  like TN/DZ/MA which have 1,000+ stations). Most OpenAQ v3 stations have no
+  pre-aggregated daily data for recent dates — this is upstream sparsity, not a
+  pipeline bug. A typical daily run returns ~20–50 rows from 500 sensor queries.
 - **OpenAQ API key:** The `/v3/sensors/{id}/measurements/daily` endpoint works
   without a key but enforces anonymous-tier rate limits. Set `OPENAQ_API_KEY` in
-  `.env` (or as a GitHub Actions secret) to use standard free-tier limits. Register
-  free at [explore.openaq.org/register](https://explore.openaq.org/register).
+  `.env` (or as a GitHub Actions secret) to use standard free-tier limits.
   Integration tests skip OpenAQ gracefully when the ingestor returns 0 rows.
+- **B2 Class B (download) transaction cap:** Backblaze B2's free tier allows
+  2,500 Class B transactions per day. A daily pipeline run uses ~150–200
+  transactions. Backfills over more than ~20 dates should be split across days to
+  avoid hitting the cap. The pipeline fails fast with a 403 AccessDenied when the
+  cap is reached — it does not silently retry or skip.
 - **B2 storage auth:** The pipeline uses Backblaze B2 Application Keys for
   S3-compatible access. Create an Application Key at the Backblaze console and
   set `B2_KEY_ID` / `B2_APP_KEY` as GitHub Actions secrets before triggering
   `pipeline-run.yml`.
+- **OCI VM (Iter 16 — pending):** The Terraform and Ansible configuration for the
+  OCI Always-Free ARM VM is complete and tested, but the VM has not been
+  provisioned yet (OCI account requires a credit card for verification). Until
+  Iter 16 is unblocked, the observability stack (Prometheus, Grafana, Alertmanager,
+  Pushgateway) runs locally via Docker Compose only. Pushgateway metric pushes from
+  GitHub Actions pipeline runs fail silently (best-effort, wrapped in `try/except`).
 - **node_exporter:** Shows as DOWN in local compose runs (no VM to scrape).
   UP in cloud deployments where node_exporter runs on the OCI VM.
 - **Local dev alerting:** `monitoring/alertmanager/alertmanager.yml` uses
