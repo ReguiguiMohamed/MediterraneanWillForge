@@ -23,7 +23,7 @@ groups:
             relativeTimeRange: { from: 90000, to: 0 }
             datasourceUid: "${DS_PROMETHEUS}"
             model:
-              expr: time() - pipeline_last_successful_run_timestamp{layer="bronze"}
+              expr: time() - med_ops_bronze_last_run_ts
               refId: A
               instant: true
           - refId: C
@@ -40,9 +40,9 @@ groups:
         execErrState: Alerting
         for: 0s
         annotations:
-          summary: "Pipeline has not run successfully in over 25 hours."
+          summary: "Pipeline has not run successfully in over 25 hours"
           description: >
-            The Bronze layer timestamp shows no successful run for
+            Bronze layer freshness shows no successful run for
             {{ humanizeDuration $value }}. Expected cadence is 06:00 UTC daily.
             Check the pipeline-run workflow in GitHub Actions.
         labels:
@@ -57,7 +57,7 @@ groups:
             relativeTimeRange: { from: 3600, to: 0 }
             datasourceUid: "${DS_PROMETHEUS}"
             model:
-              expr: pipeline_ingested_rows{layer="bronze", source="openaq"}
+              expr: med_ops_bronze_openaq_rows
               refId: A
               instant: true
           - refId: C
