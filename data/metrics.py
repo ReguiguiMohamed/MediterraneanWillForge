@@ -62,7 +62,15 @@ def push_to_grafana(registry: CollectorRegistry, job: str) -> None:
             timeout=10,
         )
         resp.raise_for_status()
-        logger.debug(f"Grafana remote_write OK (HTTP {resp.status_code}) — job={job}")
+        body = resp.text.strip()
+        if body:
+            logger.debug(
+                f"Grafana remote_write OK (HTTP {resp.status_code}) — job={job} — body: {body}"
+            )
+        else:
+            logger.debug(
+                f"Grafana remote_write OK (HTTP {resp.status_code}) — job={job}"
+            )
     except Exception as exc:
         logger.warning(f"Grafana remote_write failed (non-fatal) [job={job}]: {exc}")
 

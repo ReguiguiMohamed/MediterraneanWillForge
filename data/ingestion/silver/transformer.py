@@ -431,6 +431,7 @@ def run() -> None:
                 failures.append(f"{source}/{partition}: {exc}")
                 logger.error(f"[{source}] Partition {partition} failed: {exc}")
 
+        source_rows = 0
         if batch_frames:
             try:
                 batch_df = pd.concat(batch_frames, ignore_index=True)
@@ -451,9 +452,10 @@ def run() -> None:
                     logger.warning(
                         f"[{source}] Silver Delta checkpoint failed (non-fatal): {exc}"
                     )
-                total_rows += len(batch_df)
+                source_rows = len(batch_df)
+                total_rows += source_rows
                 logger.info(
-                    f"[{source}] Wrote {len(batch_df)} rows "
+                    f"[{source}] Wrote {source_rows} rows "
                     f"({len(batch_frames)} partition(s)) → Silver."
                 )
             except Exception as exc:
@@ -461,7 +463,7 @@ def run() -> None:
                     failures.append(f"{source}/{p}: batch write failed — {exc}")
                 logger.error(f"[{source}] Batch write failed: {exc}")
 
-        rows_gauge.labels(layer="silver", source=source).set(total_rows)
+        rows_gauge.labels(layer="silver", source=source).set(source_rows)
 
     elapsed = time.monotonic() - t_start
     fresh_gauge.labels(layer="silver").set(time.time())
