@@ -100,35 +100,36 @@ class BronzeIngestor(ABC):
     # ── Metrics ───────────────────────────────────────────────────────────────
 
     def _init_metrics(self) -> None:
+        src = self.source_name
         self._rows_gauge = Gauge(
-            "pipeline_ingested_rows",
+            f"med_ops_bronze_{src}_rows",
             "Rows written in this ingest run",
-            ["layer", "source"],
+            [],
             registry=self._registry,
         )
         self._freshness_gauge = Gauge(
-            "pipeline_last_successful_run_timestamp",
+            f"med_ops_bronze_{src}_last_run_ts",
             "Unix timestamp of last successful run",
-            ["layer"],
+            [],
             registry=self._registry,
         )
         self._duration_gauge = Gauge(
-            "pipeline_duration_seconds",
-            "Wall-clock seconds per pipeline stage",
-            ["stage"],
+            f"med_ops_bronze_{src}_duration_seconds",
+            "Wall-clock seconds for this Bronze stage",
+            [],
             registry=self._registry,
         )
         self._quality_counter = Counter(
-            "pipeline_quality_check_failures_total",
+            f"med_ops_bronze_{src}_quality_failures_total",
             "Number of data quality gate failures",
-            ["check_name", "layer"],
+            [],
             registry=self._registry,
         )
 
     def _push_metrics(self, rows: int, elapsed: float) -> None:
-        self._rows_gauge.labels(layer="bronze", source=self.source_name).set(rows)
-        self._freshness_gauge.labels(layer="bronze").set(time.time())
-        self._duration_gauge.labels(stage=f"bronze_{self.source_name}").set(elapsed)
+        self._rows_gauge.set(rows)
+        self._freshness_gauge.set(time.time())
+        self._duration_gauge.set(elapsed)
         try:
             push_to_gateway(
                 self.pushgateway_url,

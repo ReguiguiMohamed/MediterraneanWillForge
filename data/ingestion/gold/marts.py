@@ -150,16 +150,19 @@ def run() -> None:
 
     reg = CollectorRegistry()
     rows_gauge = Gauge(
-        "pipeline_ingested_rows", "Rows written", ["layer", "source"], registry=reg
+        "med_ops_gold_mart_rows", "Total rows written to Gold mart", [], registry=reg
     )
     fresh_gauge = Gauge(
-        "pipeline_last_successful_run_timestamp",
-        "Last run timestamp",
-        ["layer"],
+        "med_ops_gold_mart_last_run_ts",
+        "Unix timestamp of last successful Gold mart run",
+        [],
         registry=reg,
     )
     dur_gauge = Gauge(
-        "pipeline_duration_seconds", "Stage duration", ["stage"], registry=reg
+        "med_ops_gold_mart_duration_seconds",
+        "Wall-clock seconds for Gold mart",
+        [],
+        registry=reg,
     )
 
     logger.info("Gold mart build starting.")
@@ -220,9 +223,9 @@ def run() -> None:
     total_rows = len(summary) + len(risk)
     elapsed = time.monotonic() - t_start
 
-    rows_gauge.labels(layer="gold", source="all").set(total_rows)
-    fresh_gauge.labels(layer="gold").set(time.time())
-    dur_gauge.labels(stage="gold_mart").set(elapsed)
+    rows_gauge.set(total_rows)
+    fresh_gauge.set(time.time())
+    dur_gauge.set(elapsed)
 
     try:
         push_to_gateway(pushgateway, job="med_ops_gold_mart", registry=reg)

@@ -330,27 +330,27 @@ def _unprocessed_partitions(
 def _build_metrics() -> tuple[CollectorRegistry, Gauge, Gauge, Gauge, Counter]:
     reg = CollectorRegistry()
     rows = Gauge(
-        "pipeline_ingested_rows",
-        "Rows written in this run",
-        ["layer", "source"],
+        "med_ops_silver_rows",
+        "Total rows written to Silver this run",
+        [],
         registry=reg,
     )
     fresh = Gauge(
-        "pipeline_last_successful_run_timestamp",
-        "Unix timestamp of last successful run",
-        ["layer"],
+        "med_ops_silver_last_run_ts",
+        "Unix timestamp of last successful Silver run",
+        [],
         registry=reg,
     )
     dur = Gauge(
-        "pipeline_duration_seconds",
-        "Wall-clock seconds per pipeline stage",
-        ["stage"],
+        "med_ops_silver_duration_seconds",
+        "Wall-clock seconds for Silver transform",
+        [],
         registry=reg,
     )
     qual = Counter(
-        "pipeline_quality_check_failures_total",
+        "med_ops_silver_quality_failures_total",
         "Data quality gate failures",
-        ["check_name", "layer"],
+        [],
         registry=reg,
     )
     return reg, rows, fresh, dur, qual
@@ -463,11 +463,10 @@ def run() -> None:
                     failures.append(f"{source}/{p}: batch write failed — {exc}")
                 logger.error(f"[{source}] Batch write failed: {exc}")
 
-        rows_gauge.labels(layer="silver", source=source).set(source_rows)
-
+    rows_gauge.set(total_rows)
     elapsed = time.monotonic() - t_start
-    fresh_gauge.labels(layer="silver").set(time.time())
-    dur_gauge.labels(stage="silver_transform").set(elapsed)
+    fresh_gauge.set(time.time())
+    dur_gauge.set(elapsed)
 
     try:
         push_to_gateway(

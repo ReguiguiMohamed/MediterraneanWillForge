@@ -161,23 +161,23 @@ def push_to_grafana_anomaly(total: int, anomalies: int, elapsed: float) -> None:
 
     reg = CollectorRegistry()
     Gauge(
-        "pipeline_ingested_rows",
-        "Rows written in this run",
-        ["layer", "source"],
+        "med_ops_gold_anomaly_rows",
+        "Rows processed by anomaly detection",
+        [],
         registry=reg,
-    ).labels(layer="gold_anomaly", source="all").set(total)
+    ).set(total)
     Gauge(
-        "pipeline_anomaly_flags_total",
+        "med_ops_gold_anomaly_flags",
         "Anomalous readings flagged by Isolation Forest",
-        ["model"],
+        [],
         registry=reg,
-    ).labels(model="isolation_forest").set(anomalies)
+    ).set(anomalies)
     Gauge(
-        "pipeline_duration_seconds",
-        "Wall-clock seconds per pipeline stage",
-        ["stage"],
+        "med_ops_gold_anomaly_duration_seconds",
+        "Wall-clock seconds for anomaly detection",
+        [],
         registry=reg,
-    ).labels(stage="gold_anomaly").set(elapsed)
+    ).set(elapsed)
 
     push_to_grafana(reg, job="med_ops_gold_anomaly")
 
