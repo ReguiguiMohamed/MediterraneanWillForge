@@ -275,13 +275,21 @@ via Prometheus remote_write after every stage. The `data/metrics.py` helper
 handles protobuf encoding, raw Snappy compression, and Basic Auth. It is a
 silent no-op when `GRAFANA_*` env vars are absent, so local dev is unaffected.
 
-| Metric | Purpose |
-|---|---|
-| `pipeline_ingested_rows{layer, source}` | Row count written per run |
-| `pipeline_last_successful_run_timestamp{layer}` | Freshness tracking |
-| `pipeline_duration_seconds{stage}` | Runtime per pipeline stage |
-| `pipeline_quality_check_failures_total{check_name, layer}` | Failed data quality gates |
-| `pipeline_anomaly_flags_total{model}` | Anomalous readings flagged by Isolation Forest |
+Each pipeline stage pushes a set of flat, stage-specific Prometheus metrics (no shared metric names
+with label dimensions — required by Grafana Cloud free-tier per-series limits):
+
+| Metric | Stage | Purpose |
+|---|---|---|
+| `med_ops_bronze_openmeteo_rows` | Bronze Open-Meteo | Row count written per run |
+| `med_ops_bronze_openaq_rows` | Bronze OpenAQ | Row count written per run |
+| `med_ops_silver_rows` | Silver | Row count written per run |
+| `med_ops_gold_mart_rows` | Gold marts | Total rows across both Gold marts |
+| `med_ops_gold_anomaly_rows` | Gold anomaly | Rows processed by Isolation Forest |
+| `med_ops_gold_anomaly_flags` | Gold anomaly | Anomalous readings flagged |
+| `med_ops_{stage}_last_run_ts` | All stages | Unix timestamp of last successful run |
+| `med_ops_{stage}_duration_seconds` | All stages | Wall-clock seconds per stage |
+| `med_ops_bronze_{src}_quality_failures_total` | Bronze | Data quality gate failures |
+| `med_ops_silver_quality_failures_total` | Silver | Data quality gate failures |
 
 **Dashboard:** `grafana/dashboards/pipeline_observability.json` — import via
 Grafana Cloud UI (Dashboards → New → Import, select the `grafanacloud-mohamedwillforge-prom`
