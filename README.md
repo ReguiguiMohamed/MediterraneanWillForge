@@ -39,15 +39,14 @@ The pipeline writes:
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document
-with a Mermaid data flow diagram, medallion schema, infrastructure breakdown, and
-observability model.
+with a Mermaid data flow diagram, medallion schema, and observability model.
 
 ```text
 Open-Meteo ----\
                 +--> Bronze --> Silver --> Gold (marts + anomaly detection)
-OpenAQ v3 ----/                    |
-                                   +--> dbt models
-        Backblaze B2 (Delta Lake / S3-compat)
+OpenAQ v3 ----/
+
+        Backblaze B2 (Delta Lake / S3-compat, eu-central-003)
 
 Jobs --> remote_write --> Grafana Cloud (Mimir) --> Dashboards + Alerts
 ```
@@ -70,15 +69,14 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 
 | Domain | Tools |
 |---|---|
-| Cloud infrastructure | Oracle Cloud (OCI) Always-Free — ARM Ampere A1 VM (Terraform + Ansible, pending provisioning) |
 | Storage | Backblaze B2 (S3-compatible, `eu-central-003`), Delta Lake, delta-rs |
 | Local dev storage | MinIO `RELEASE.2025-09-07T16-13-09Z` (via docker-compose override) |
 | Data pipeline | Python 3.11, pandas, pyarrow, deltalake |
-| Transformation | Bronze → Silver → Gold Python jobs + dbt models (DuckDB over Silver Parquet) |
+| Transformation | Bronze → Silver → Gold Python jobs |
 | ML | scikit-learn `IsolationForest` — anomaly detection on Silver PM2.5 / O3 / NO2 |
-| Quality | Soda-style checks, custom runner, Great Expectations schema validation |
+| Quality | Custom data quality runner, Great Expectations schema validation |
 | Observability | Grafana Cloud (`mohamedwillforge.grafana.net`) — Prometheus remote_write to Mimir, hosted dashboards and alert rules |
-| Local observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, Grafana `10.4.2`, cAdvisor (docker-compose) |
+| Local observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, cAdvisor (docker-compose) |
 | CI/CD | GitHub Actions (5 workflows), ghcr.io image publishing |
 
 ## Repository Layout
@@ -86,15 +84,11 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 ```text
 mediterranean-ops-fortress/
 |-- .github/workflows/
-|   |-- ci-data.yml          # lint, unit tests, dbt compile, integration tests
-|   |-- ci-infra.yml         # terraform, ansible, prometheus, alertmanager checks
+|   |-- ci-data.yml          # lint, unit tests, integration tests
+|   |-- ci-infra.yml         # prometheus config and alert rule validation
 |   |-- cd-deploy.yml        # ghcr.io image publishing
 |   |-- pipeline-run.yml     # daily cron + manual run against real B2
-|   `-- verify-secrets.yml  # lightweight credential probe (B2 + Grafana)
-|-- ansible/
-|   |-- site.yml
-|   |-- vars/common.yml
-|   `-- roles/
+|   `-- verify-secrets.yml   # lightweight credential probe (B2 + Grafana)
 |-- data/
 |   |-- ingestion/
 |   |   |-- bronze/
@@ -104,13 +98,12 @@ mediterranean-ops-fortress/
 |   |   |-- silver/transformer.py
 |   |   `-- gold/
 |   |       |-- marts.py                 # daily_country_summary + wildfire_risk_index
-|   |       `-- anomaly.py              # Isolation Forest anomaly_alerts
-|   |-- metrics.py                      # Grafana Cloud remote_write helper
+|   |       `-- anomaly.py               # Isolation Forest anomaly_alerts
+|   |-- metrics.py                       # Grafana Cloud remote_write helper
 |   |-- quality/
-|   |-- schemas/
-|   `-- dbt/
+|   `-- schemas/
 |-- docker/
-|   |-- docker-compose.yml           # base stack (OCI storage mode)
+|   |-- docker-compose.yml           # base stack
 |   |-- docker-compose.override.yml  # local dev — adds MinIO
 |   |-- ingestion/Dockerfile
 |   `-- quality/Dockerfile
@@ -118,22 +111,15 @@ mediterranean-ops-fortress/
 |   |-- architecture.md
 |   `-- adr/001-lakehouse-format.md
 |-- grafana/
-|   |-- dashboards/pipeline_observability.json  # import into Grafana Cloud UI
+|   |-- dashboards/pipeline_observability.json  # live Grafana Cloud dashboard (v2 format)
 |   `-- alerts/pipeline_alerts.yaml             # alert rule reference (3 rules)
 |-- monitoring/
-|   |-- prometheus/
-|   |-- alertmanager/
-|   `-- grafana/
-|-- terraform/
-|   |-- main.tf
-|   |-- versions.tf
-|   |-- modules/
-|   `-- environments/cloud/terraform.tfvars.example
+|   |-- prometheus/          # local dev Prometheus config + alert rules
+|   `-- alertmanager/        # local dev Alertmanager config (webhook stubs)
 |-- tests/
 |   |-- unit/
 |   |-- integration/
 |   `-- ci_verify_silver.py / ci_verify_gold.py
-|-- vagrant/
 |-- .env.example
 |-- Makefile
 `-- README.md
@@ -150,8 +136,6 @@ CAMS-backed model data. The persisted source label and storage path are `openmet
 |---|---|---|
 | Docker | 24+ | Compose stack and pipeline job containers |
 | Python | 3.11 | Local tests and development |
-| Terraform | 1.7+ | OCI infrastructure provisioning |
-| Ansible | 2.14+ | VM configuration and service deployment |
 
 ### Configure
 
@@ -168,115 +152,72 @@ Open-Meteo requires no API key. An OpenAQ API key is optional but recommended
 
 ---
 
-### Option A — Docker Compose (local development)
+### Local Development
 
-Bring up the observability stack:
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-This starts Prometheus, Pushgateway, Alertmanager, Grafana, and cAdvisor.
-All services expose healthchecks; Prometheus and Grafana wait for their
-dependencies before starting.
-
-To run pipeline jobs locally (adds a MinIO container for lakehouse storage):
+Bring up the local observability stack (Prometheus, Pushgateway, Alertmanager, cAdvisor):
 
 ```bash
-# docker-compose.override.yml is merged automatically when present
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.override.yml \
-  --profile jobs up -d
+make monitoring-up
 ```
 
-Run the full pipeline (with local MinIO):
+To run pipeline jobs locally with MinIO as the lakehouse backend:
 
 ```bash
-make ingest       # bronze (both sources) -> silver -> gold
-make quality      # data quality checks
-make dbt-run      # dbt models over silver
-make dbt-test     # dbt schema and freshness tests
+make up          # starts MinIO + observability stack
+make ingest      # bronze (both sources) -> silver -> gold
 ```
 
-Access the stack:
+Access the local stack:
 
 | Service | URL |
 |---|---|
-| MinIO console (local dev only) | http://localhost:9001 (minioadmin / minioadmin) |
+| MinIO console | http://localhost:9001 (minioadmin / minioadmin) |
 | Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 (admin / fortress) |
 | Alertmanager | http://localhost:9093 |
 | Pushgateway | http://localhost:9091 |
 
+Grafana dashboards are hosted on [Grafana Cloud](https://mohamedwillforge.grafana.net) —
+the live dashboard is not part of the local stack.
+
 ---
 
-### Option B — OCI Cloud Deployment
+### Run Against Backblaze B2
 
-Provision the cloud VM and storage with Terraform, then configure with Ansible.
-All OCI resources used fall under the [Always Free tier](https://www.oracle.com/cloud/free/).
-
-```bash
-cd terraform
-cp environments/cloud/terraform.tfvars.example environments/cloud/terraform.tfvars
-# fill in tenancy_ocid, user_ocid, fingerprint, private_key_path, ssh_authorized_keys
-terraform init
-terraform apply -var-file=environments/cloud/terraform.tfvars
-```
-
-Terraform outputs the VM public IP and S3-compatible Object Storage endpoint.
+Set credentials in `.env` (create an Application Key at backblaze.com):
 
 ```bash
-# Update ansible/inventory/hosts.ini with the VM public IP
-# Update ansible/vars/common.yml with OCI storage credentials and Slack webhook URL
-cd ../ansible
-ansible-playbook site.yml -i inventory/hosts.ini
-```
-
-Run the pipeline against Backblaze B2:
-
-```bash
-# Fill in B2 credentials in .env (create an Application Key at backblaze.com)
 export MINIO_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 export MINIO_ACCESS_KEY=<b2-key-id>
 export MINIO_SECRET_KEY=<b2-application-key>
 make ingest
-make quality
 ```
 
-Alternatively, trigger the `pipeline-run.yml` workflow from the GitHub Actions tab
-(requires `B2_KEY_ID` and `B2_APP_KEY` set as repository secrets).
-
----
-
-### Option C — CI
-
-Push to `main` or `develop`. Three workflows fire automatically:
-
-- `ci-data.yml` — lint, unit tests, dbt compile, MinIO-backed integration tests
-  including Silver and Gold verification
-- `ci-infra.yml` — Terraform format and validate, Ansible lint, Prometheus rule
-  validation, Alertmanager config check
-- `cd-deploy.yml` — builds and publishes images to ghcr.io on `main`
+Or trigger `pipeline-run.yml` from the GitHub Actions tab (requires `B2_KEY_ID`
+and `B2_APP_KEY` as repository secrets).
 
 ---
 
 ### Run Tests Locally
 
 ```bash
-ruff check data/ tests/
-black --check data/ tests/
-pytest tests/unit/ -v
-pytest tests/integration/ -v   # requires a live MinIO endpoint
+make lint        # ruff + black check
+make test        # all pytest tests
 ```
+
+Integration tests require a live MinIO or B2 endpoint.
+
+---
 
 ## Observability
 
 Pipeline jobs push metrics to **Grafana Cloud** (`mohamedwillforge.grafana.net`)
 via Prometheus remote_write after every stage. The `data/metrics.py` helper
-handles protobuf encoding, raw Snappy compression, and Basic Auth. It is a
+handles protobuf encoding, Snappy compression, and Basic Auth. It is a
 silent no-op when `GRAFANA_*` env vars are absent, so local dev is unaffected.
 
-Each pipeline stage pushes a set of flat, stage-specific Prometheus metrics (no shared metric names
-with label dimensions — required by Grafana Cloud free-tier per-series limits):
+Each stage pushes flat, stage-specific Prometheus metrics. Flat names (no shared
+metric name with label dimensions) are required by Grafana Cloud free-tier
+per-series limits:
 
 | Metric | Stage | Purpose |
 |---|---|---|
@@ -291,28 +232,30 @@ with label dimensions — required by Grafana Cloud free-tier per-series limits)
 | `med_ops_bronze_{src}_quality_failures_total` | Bronze | Data quality gate failures |
 | `med_ops_silver_quality_failures_total` | Silver | Data quality gate failures |
 
-**Dashboard:** `grafana/dashboards/pipeline_observability.json` — import via
-Grafana Cloud UI (Dashboards → New → Import, select the `grafanacloud-mohamedwillforge-prom`
-datasource when prompted).
+Dashboard queries use `last_over_time(metric[25h])` on all stat panels so values
+persist through the day after a single daily push.
+
+**Dashboard:** `grafana/dashboards/pipeline_observability.json` (Grafana v2 API
+format, datasource `grafanacloud-prom`). Import via Grafana Cloud UI:
+Dashboards → New → Import.
 
 **Alert rules** (`grafana/alerts/pipeline_alerts.yaml`) — three managed rules:
 pipeline stale >25 h (critical), OpenAQ 0 rows (warning), quality failure (warning).
 Create via Alerting → Alert rules → New alert rule using the PromQL expressions
 in the YAML file.
 
-Local dev retains a self-hosted stack (Prometheus, Pushgateway, Alertmanager,
-Grafana, cAdvisor) via `docker/docker-compose.yml`. Alertmanager routes alerts
-into three groups (`infra_critical`, `pipeline_ops`, `infra_ops`) with Slack
-delivery configured via `ansible/vars/common.yml`.
+Local dev retains Prometheus, Pushgateway, and Alertmanager via `docker/docker-compose.yml`.
+Alertmanager routing is defined in `monitoring/alertmanager/alertmanager.yml` with
+webhook stubs — local dev does not send real alerts.
 
 ## CI/CD
 
 | Workflow | Triggers | What It Checks |
 |---|---|---|
-| `ci-data.yml` | Push/PR on `data/**`, `tests/**`, `docker/**` | ruff, black, unit tests, dbt compile, Docker builds, MinIO integration, Silver/Gold assertions, dbt run+test |
-| `ci-infra.yml` | Push/PR on `terraform/**`, `ansible/**`, `monitoring/**` | terraform fmt, terraform validate, tflint, ansible-lint, promtool rules, amtool check-config |
+| `ci-data.yml` | Push/PR on `data/**`, `tests/**`, `docker/**` | ruff, black, unit tests, Docker builds, MinIO integration, Silver/Gold assertions |
+| `ci-infra.yml` | Push/PR on `monitoring/**` | promtool validates prometheus.yml and alert rules; amtool validates alertmanager config |
 | `cd-deploy.yml` | Push to `main` on `docker/**`, `data/ingestion/**` | Builds and pushes versioned images to ghcr.io |
-| `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold → Anomaly against real B2; supports single-date and date-range backfill; requires `B2_KEY_ID`, `B2_APP_KEY`; pushes metrics to Grafana Cloud when `GRAFANA_*` secrets are set |
+| `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold → Anomaly against real B2; supports single-date and date-range backfill; pushes metrics to Grafana Cloud when `GRAFANA_*` secrets are set |
 | `verify-secrets.yml` | Manual (`workflow_dispatch`) | Probes B2 and Grafana Cloud credentials without touching data (~30 s) |
 
 Pinned linting versions:
@@ -337,23 +280,20 @@ black==26.3.1
   2,500 Class B transactions per day. Delta Lake checkpoints are created after
   every write (`create_checkpoint()`) so each `DeltaTable()` open costs a fixed
   2 Class B regardless of table history. A steady-state daily run uses ~50–100
-  transactions. Backfills over more than ~20 dates should still be split across
-  days to avoid hitting the cap. The pipeline fails fast with a 403 when the cap
-  is reached — it does not silently retry or skip.
+  transactions. Backfills over more than ~20 dates should be split across days
+  to avoid hitting the cap. The pipeline fails fast with a 403 when the cap is
+  reached — it does not silently retry or skip.
 - **B2 storage auth:** The pipeline uses Backblaze B2 Application Keys for
   S3-compatible access. Create an Application Key at the Backblaze console and
   set `B2_KEY_ID` / `B2_APP_KEY` as GitHub Actions secrets before triggering
   `pipeline-run.yml`.
-- **OCI VM:** The Terraform and Ansible configuration targets Oracle Cloud
-  Always-Free (ARM A1 VM) but has not been provisioned (OCI account requires a
-  credit card). Observability is fully covered by Grafana Cloud free tier
-  (`mohamedwillforge.grafana.net`) which requires no credit card and no VM.
-  The self-hosted docker-compose stack remains for local development.
-- **node_exporter:** Shows as DOWN in local compose runs (no VM to scrape).
-  UP in cloud deployments where node_exporter runs on the OCI VM.
+- **Grafana Cloud free tier metric series limit:** Mimir silently drops series
+  beyond the first unique combination per metric name. All metrics use flat
+  per-stage names (e.g. `med_ops_silver_rows`) rather than shared names with
+  label dimensions to stay within the free-tier limit.
 - **Local dev alerting:** `monitoring/alertmanager/alertmanager.yml` uses
-  `localhost:5001` stubs intentionally — local dev does not send real alerts.
-  The cloud path (Ansible-generated config) uses Slack.
+  `localhost:5001` webhook stubs — local dev does not send real alerts. Grafana
+  Cloud contact points handle production alerting.
 - **Image digest pinning:** Docker image tags are pinned to specific versions
   (including `python:3.11.15-slim`), but not to SHA-256 digests. Tag pinning
   protects against `:latest` drift; digest pinning would add supply-chain
