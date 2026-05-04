@@ -82,7 +82,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_bronze_openmeteo_rows",
+          "expr": "last_over_time(med_ops_bronze_openmeteo_rows[25h])",
           "legendFormat": "openmeteo",
           "refId": "A"
         }
@@ -141,7 +141,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_bronze_openaq_rows",
+          "expr": "last_over_time(med_ops_bronze_openaq_rows[25h])",
           "legendFormat": "openaq",
           "refId": "A"
         }
@@ -200,7 +200,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_silver_rows",
+          "expr": "last_over_time(med_ops_silver_rows[25h])",
           "legendFormat": "silver",
           "refId": "A"
         }
@@ -259,7 +259,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_gold_mart_rows",
+          "expr": "last_over_time(med_ops_gold_mart_rows[25h])",
           "legendFormat": "gold",
           "refId": "A"
         }
@@ -318,12 +318,12 @@
       },
       "targets": [
         {
-          "expr": "time() - med_ops_bronze_openmeteo_last_run_ts",
+          "expr": "time() - last_over_time(med_ops_bronze_openmeteo_last_run_ts[25h])",
           "legendFormat": "openmeteo",
           "refId": "A"
         },
         {
-          "expr": "time() - med_ops_bronze_openaq_last_run_ts",
+          "expr": "time() - last_over_time(med_ops_bronze_openaq_last_run_ts[25h])",
           "legendFormat": "openaq",
           "refId": "B"
         }
@@ -393,7 +393,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_bronze_openmeteo_duration_seconds",
+          "expr": "last_over_time(med_ops_bronze_openmeteo_duration_seconds[25h])",
           "refId": "A"
         }
       ],
@@ -448,7 +448,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_bronze_openaq_duration_seconds",
+          "expr": "last_over_time(med_ops_bronze_openaq_duration_seconds[25h])",
           "refId": "A"
         }
       ],
@@ -503,7 +503,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_silver_duration_seconds",
+          "expr": "last_over_time(med_ops_silver_duration_seconds[25h])",
           "refId": "A"
         }
       ],
@@ -558,7 +558,7 @@
       },
       "targets": [
         {
-          "expr": "med_ops_gold_mart_duration_seconds",
+          "expr": "last_over_time(med_ops_gold_mart_duration_seconds[25h])",
           "refId": "A"
         }
       ],
