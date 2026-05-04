@@ -299,7 +299,18 @@ class OpenAQIngestor(BronzeIngestor):
             return []
         if data is None:
             return []
-        locations = data.get("results", [])
+        all_locs = data.get("results", [])
+        # OpenAQ occasionally returns stations whose country.code disagrees with the
+        # country we queried (mis-attributed records in their DB). Drop them here so
+        # foreign stations never enter Bronze.
+        locations = [
+            loc for loc in all_locs if (loc.get("country") or {}).get("code") == country
+        ]
+        dropped = len(all_locs) - len(locations)
+        if dropped:
+            logger.warning(
+                f"[openaq] {country}: dropped {dropped} location(s) with mismatched country_code"
+            )
         logger.debug(f"[openaq] {country}: {len(locations)} locations")
         return locations
 
