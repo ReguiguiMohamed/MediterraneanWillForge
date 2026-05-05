@@ -23,7 +23,7 @@ The platform pulls two real public data sources:
 | Source | Data | Notes |
 |---|---|---|
 | Open-Meteo Air Quality API | CAMS-backed daily PM2.5, PM10, NO2, and O3 means for 12 Mediterranean city grid points | Free, no API key |
-| OpenAQ v3 | Station observations for TN, DZ, MA, LY, EG, TR, GR, ES, IT, and LB | Free API; API key recommended (register free at openaq.org); daily aggregates via `/v3/sensors/{id}/measurements/daily` |
+| OpenAQ v3 | Station observations for TN, DZ, MA, EG, TR, GR, ES, IT, and LB | Free API; API key recommended (register free at openaq.org); daily aggregates via `/v3/sensors/{id}/measurements/daily` |
 
 The pipeline writes:
 
@@ -35,6 +35,19 @@ The pipeline writes:
 | Gold | `s3://gold/daily_country_summary` | Daily country/source pollutant summaries and WHO exceedance percentages |
 | Gold | `s3://gold/wildfire_risk_index` | Composite O3 + PM2.5 station risk index (0–100 score) |
 | Gold | `s3://gold/anomaly_alerts` | Isolation Forest anomaly flags per station per day (PM2.5, O3, NO2 features) |
+
+## Pipeline Output
+
+Charts generated from live Gold tables on Backblaze B2. See [`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb) for the full analysis.
+
+**Station coverage — country × date**
+![Coverage heatmap](docs/coverage_heatmap.png)
+
+**WHO guideline exceedance rates by country**
+![WHO exceedance](docs/who_exceedance.png)
+
+**Anomaly detection — Isolation Forest results**
+![Anomaly detection](docs/anomaly_detection.png)
 
 ## Architecture
 
@@ -109,6 +122,12 @@ mediterranean-ops-fortress/
 |   `-- quality/Dockerfile
 |-- docs/
 |   |-- architecture.md
+|   |-- pipeline_report.ipynb   # live analysis notebook (reads from B2 Gold)
+|   |-- coverage_heatmap.png
+|   |-- who_exceedance.png
+|   |-- wildfire_risk.png
+|   |-- pollutants_by_country.png
+|   |-- anomaly_detection.png
 |   `-- adr/001-lakehouse-format.md
 |-- grafana/
 |   |-- dashboards/pipeline_observability.json  # live Grafana Cloud dashboard (v2 format)
