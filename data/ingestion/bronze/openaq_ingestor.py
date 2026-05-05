@@ -39,7 +39,6 @@ TARGET_COUNTRIES: list[str] = [
     "TN",
     "DZ",
     "MA",
-    "LY",
     "EG",
     "TR",
     "GR",
@@ -47,6 +46,21 @@ TARGET_COUNTRIES: list[str] = [
     "IT",
     "LB",
 ]
+
+# OpenAQ v3 requires numeric country IDs for the countries_id filter parameter.
+# ISO code strings passed to the old `country` param are silently ignored by the API.
+# Run: GET /v3/countries?limit=200 to refresh if countries change.
+_COUNTRY_ID_MAP: dict[str, int] = {
+    "LB": 13,
+    "MA": 27,
+    "TR": 66,
+    "ES": 67,
+    "TN": 73,
+    "GR": 80,
+    "IT": 91,
+    "DZ": 122,
+    "EG": 162,
+}
 
 _OPENAQ_BASE = "https://api.openaq.org/v3"
 # Hard cap per country — prevents rate-limit flooding on high-density countries (TN/DZ/MA)
@@ -285,11 +299,17 @@ class OpenAQIngestor(BronzeIngestor):
 
     def _fetch_locations(self, country: str) -> list[dict]:
         """Fetch up to _MAX_LOCS_PER_COUNTRY locations with target sensors for a country."""
+        country_id = _COUNTRY_ID_MAP.get(country)
+        if country_id is None:
+            logger.warning(
+                f"[openaq] {country}: no numeric country ID in _COUNTRY_ID_MAP — skipping"
+            )
+            return []
         try:
             data = self._get(
                 f"{_OPENAQ_BASE}/locations",
                 {
-                    "country": country,
+                    "countries_id": country_id,
                     "limit": _MAX_LOCS_PER_COUNTRY,
                     "parameters_id": list(_PARAMETER_MAP.keys()),
                 },
