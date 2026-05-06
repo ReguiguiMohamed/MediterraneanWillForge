@@ -87,6 +87,27 @@ def run() -> None:
         )
         return
 
+    # Exclude stations seen on fewer than 2 dates — first-appearance stations
+    # have no historical baseline and are systematically flagged as anomalies
+    # by Isolation Forest because their pollutant profiles are isolated from
+    # the existing distribution (e.g. new WAQI stations on day 1).
+    station_date_counts = feat_df.groupby("station_id")["date"].nunique()
+    established = station_date_counts[station_date_counts >= 2].index
+    excluded = len(feat_df) - feat_df["station_id"].isin(established).sum()
+    if excluded:
+        logger.info(
+            f"Excluding {excluded} row(s) from {(~feat_df['station_id'].isin(established)).sum()} "
+            f"first-appearance station(s) — no historical baseline yet."
+        )
+    feat_df = feat_df[feat_df["station_id"].isin(established)].copy()
+
+    if len(feat_df) < _MIN_ROWS:
+        logger.warning(
+            f"Only {len(feat_df)} established-station rows after filtering — "
+            "skipping anomaly detection."
+        )
+        return
+
     logger.info(f"Silver snapshot: {len(feat_df)} rows with pollutant data.")
 
     # ── Feature matrix (fill NaN with column median) ───────────────────────────
