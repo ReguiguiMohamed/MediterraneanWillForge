@@ -348,6 +348,6 @@ Data sources:
 - [OpenAQ](https://openaq.org/) open air quality data platform
 - [WAQI](https://waqi.info/) World Air Quality Index
 
-This project was built with assistance from Claude (Anthropic) as an AI pair
-programmer. Claude contributed to architecture decisions, implementation, and
-code review across multiple sessions.
+## A Note on Construction
+
+This project was built in close collaboration with Claude (Anthropic). The philosophical question of what that means for authorship is not very interesting. Tools have always shaped what builders can build and the question was never the hammer, it was the will behind it. The decisions made here, what to build, what to reject, what to hold the line on, were human. Claude wrote much of the implementation. The judgment of what mattered and why remained mine.
