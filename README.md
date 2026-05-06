@@ -51,6 +51,9 @@ Charts generated from live Gold tables on Backblaze B2. See [`docs/pipeline_repo
 **Anomaly detection — Isolation Forest results**
 ![Anomaly detection](docs/anomaly_detection.png)
 
+**Data source coverage — station-days per country per source**
+![Source coverage](docs/source_coverage.png)
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document
@@ -131,6 +134,7 @@ mediterranean-ops-fortress/
 |   |-- wildfire_risk.png
 |   |-- pollutants_by_country.png
 |   |-- anomaly_detection.png
+|   `-- source_coverage.png
 |   `-- adr/001-lakehouse-format.md
 |-- grafana/
 |   |-- dashboards/pipeline_observability.json  # live Grafana Cloud dashboard (v2 format)
