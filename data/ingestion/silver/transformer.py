@@ -30,7 +30,7 @@ who_pm10_exceed    int   — 1 if PM10  > 45 µg/m³
 who_no2_exceed     int   — 1 if NO2   > 25 µg/m³
 who_o3_exceed      int   — 1 if O3    > 100 µg/m³
 data_completeness  float — fraction of the 4 pollutant columns that are non-null
-source             str   — openmeteo | openaq
+source             str   — openmeteo | openaq | waqi
 silver_ts          str   — UTC ISO-8601 write timestamp
 partition_date     str   — YYYY-MM-DD (Delta partition key)
 """
@@ -368,6 +368,7 @@ def run() -> None:
     sources = [
         ("openmeteo", f"s3://{cfg.bronze_bucket}/openmeteo/air_quality"),
         ("openaq", f"s3://{cfg.bronze_bucket}/openaq/air_quality"),
+        ("waqi", f"s3://{cfg.bronze_bucket}/waqi/air_quality"),
     ]
 
     logger.info("Silver transformation starting.")

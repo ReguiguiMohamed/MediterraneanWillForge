@@ -42,6 +42,7 @@ env:
   BACKFILL_START:                      ${{ inputs.backfill_start }}
   BACKFILL_END:                        ${{ inputs.backfill_end }}
   OPENAQ_API_KEY:                      ${{ secrets.OPENAQ_API_KEY }}
+  WAQI_API_KEY:                        ${{ secrets.WAQI_API_KEY }}
   GRAFANA_REMOTE_WRITE_URL:            ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
   GRAFANA_METRICS_ID:                  ${{ secrets.GRAFANA_METRICS_ID }}
   GRAFANA_TOKEN:                       ${{ secrets.GRAFANA_TOKEN }}
@@ -198,6 +199,20 @@ jobs:
           else:
               run()
           EOF
+
+      - name: Bronze — WAQI (Mediterranean / North African cities)
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+        run: |
+          for d in $PIPELINE_DATES; do
+            echo "=== waqi: $d ==="
+            python -c "
+          from datetime import date
+          from data.ingestion.bronze.waqi_ingestor import run
+          run(date.fromisoformat('$d'))
+          "
+          done
 
       - name: Silver — Transform (Bronze → Silver)
         env:
