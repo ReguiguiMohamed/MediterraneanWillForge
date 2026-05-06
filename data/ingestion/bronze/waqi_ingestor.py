@@ -133,7 +133,12 @@ class WAQIIngestor(BronzeIngestor):
     ) -> dict | None:
         """
         Extract a canonical Bronze row from a WAQI feed dict.
-        Returns None if the feed's UTC timestamp does not match target_date.
+
+        WAQI returns a station's latest available reading, which in UTC may be
+        a few hours ahead of target_date (e.g. a +03:00 station reporting at
+        22:00 local = 19:00 UTC the same day, or just past midnight UTC the
+        next day). Accept readings within ±1 day of target_date and attribute
+        all of them to target_date so the Bronze partition stays consistent.
         """
         time_info = feed.get("time") or {}
         ts_unix = time_info.get("v")
@@ -141,7 +146,7 @@ class WAQIIngestor(BronzeIngestor):
             return None
 
         utc_date = datetime.utcfromtimestamp(ts_unix).date()
-        if utc_date != target_date:
+        if abs((utc_date - target_date).days) > 1:
             return None
 
         city_info = feed.get("city") or {}

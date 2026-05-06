@@ -18,12 +18,13 @@ validation, hosted metrics, alert rules, and no synthetic fallback data.
 
 ## What It Does
 
-The platform pulls two real public data sources:
+The platform pulls three real public data sources:
 
 | Source | Data | Notes |
 |---|---|---|
 | Open-Meteo Air Quality API | CAMS-backed daily PM2.5, PM10, NO2, and O3 means for 12 Mediterranean city grid points | Free, no API key |
 | OpenAQ v3 | Station observations for TN, DZ, MA, EG, TR, GR, ES, IT, and LB | Free API; API key recommended (register free at openaq.org); daily aggregates via `/v3/sensors/{id}/measurements/daily` |
+| WAQI (World Air Quality Index) | Current station readings for 15 city queries across LB, MA, TN, DZ, EG, TR, GR, ES, IT | Free API token (register at aqicn.org/data-platform/token/); fills LB and MA gaps left by OpenAQ sparsity |
 
 The pipeline writes:
 
@@ -31,6 +32,7 @@ The pipeline writes:
 |---|---|---|
 | Bronze | `s3://bronze/openmeteo/air_quality` | Open-Meteo gridded source records, partitioned by `partition_date` |
 | Bronze | `s3://bronze/openaq/air_quality` | OpenAQ station records, partitioned by `partition_date` |
+| Bronze | `s3://bronze/waqi/air_quality` | WAQI station records, partitioned by `partition_date` |
 | Silver | `s3://silver/air_quality` | Canonical cleaned rows with WHO flags, AQI category, completeness, source, and partition date |
 | Gold | `s3://gold/daily_country_summary` | Daily country/source pollutant summaries and WHO exceedance percentages |
 | Gold | `s3://gold/wildfire_risk_index` | Composite O3 + PM2.5 station risk index (0–100 score) |
@@ -56,8 +58,8 @@ with a Mermaid data flow diagram, medallion schema, and observability model.
 
 ```text
 Open-Meteo ----\
-                +--> Bronze --> Silver --> Gold (marts + anomaly detection)
-OpenAQ v3 ----/
+OpenAQ v3 ------+--> Bronze --> Silver --> Gold (marts + anomaly detection)
+WAQI ----------/
 
         Backblaze B2 (Delta Lake / S3-compat, eu-central-003)
 
@@ -107,7 +109,8 @@ mediterranean-ops-fortress/
 |   |   |-- bronze/
 |   |   |   |-- base.py
 |   |   |   |-- copernicus_ingestor.py   # Open-Meteo Air Quality source
-|   |   |   `-- openaq_ingestor.py
+|   |   |   |-- openaq_ingestor.py
+|   |   |   `-- waqi_ingestor.py         # WAQI — fills LB/MA coverage gaps
 |   |   |-- silver/transformer.py
 |   |   `-- gold/
 |   |       |-- marts.py                 # daily_country_summary + wildfire_risk_index
@@ -168,6 +171,10 @@ Open-Meteo requires no API key. An OpenAQ API key is optional but recommended
 (anonymous tier has very low rate limits). Register free at
 [explore.openaq.org/register](https://explore.openaq.org/register) and set
 `OPENAQ_API_KEY` in your `.env`.
+
+A WAQI API token is required for the third Bronze source. Register free at
+[aqicn.org/data-platform/token/](https://aqicn.org/data-platform/token/) and set
+`WAQI_API_KEY` in your `.env` (or as a GitHub secret for CI).
 
 ---
 
@@ -326,7 +333,7 @@ black==26.3.1
 - `create_checkpoint()` is called after every `write_deltalake()` to keep Class B reads at O(1).
 - Pushgateway and Grafana remote_write pushes are best-effort and wrapped in `try/except`.
 - Bronze idempotency and Silver incremental processing are partition-based.
-- Canonical Silver schema and source labels (`openmeteo`, `openaq`) are frozen.
+- Canonical Silver schema and source labels (`openmeteo`, `openaq`, `waqi`) are frozen.
 - Commits are clean: no AI co-author lines.
 
 ## Acknowledgements
@@ -335,6 +342,7 @@ Data sources:
 
 - [Open-Meteo](https://open-meteo.com/) Air Quality API, backed by CAMS model data
 - [OpenAQ](https://openaq.org/) open air quality data platform
+- [WAQI](https://waqi.info/) World Air Quality Index
 
 This project was built with assistance from Claude (Anthropic) as an AI pair
 programmer. Claude contributed to architecture decisions, implementation, and
