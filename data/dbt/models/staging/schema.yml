@@ -127,7 +127,7 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: [openmeteo, openaq]
+              values: [openmeteo, openaq, waqi]
 
       - name: partition_date
         description: "Delta partition key, YYYY-MM-DD."

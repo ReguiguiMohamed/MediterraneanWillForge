@@ -22,7 +22,7 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: [openmeteo, openaq]
+              values: [openmeteo, openaq, waqi]
 
       - name: dominant_aqi_tier
         description: "AQI category grouping key for the aggregate row."
@@ -118,5 +118,112 @@ models:
 
       - name: mart_ts
         description: "Timestamp when this row was materialized."
+        tests:
+          - not_null
+
+  - name: mart_city_weekly_trend
+    description: >
+      City-level daily PM2.5 and ozone means with trailing seven-day averages.
+      Built for readable static analytics and README/report charts.
+    columns:
+      - name: observation_date
+        tests:
+          - not_null
+      - name: country_code
+        tests:
+          - not_null
+      - name: city_name
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              values: [openmeteo, openaq, waqi]
+      - name: station_count
+        tests:
+          - not_null
+          - accepted_range:
+              min_value: 1
+      - name: rolling_7d_pm2_5
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 1000
+      - name: rolling_7d_ozone
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 500
+      - name: mart_ts
+        tests:
+          - not_null
+
+  - name: mart_source_coverage
+    description: >
+      Date, country, and source coverage table showing station counts,
+      reading counts, and pollutant availability percentages.
+    columns:
+      - name: observation_date
+        tests:
+          - not_null
+      - name: country_code
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              values: [openmeteo, openaq, waqi]
+      - name: station_count
+        tests:
+          - not_null
+          - accepted_range:
+              min_value: 1
+      - name: mean_data_completeness
+        tests:
+          - not_null
+          - accepted_range:
+              min_value: 0
+              max_value: 1
+      - name: pm2_5_available_pct
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 100
+      - name: mart_ts
+        tests:
+          - not_null
+
+  - name: mart_who_exceedance_streak
+    description: >
+      Station-day streak table tracking consecutive days where at least one WHO
+      daily pollutant guideline is exceeded.
+    columns:
+      - name: observation_date
+        tests:
+          - not_null
+      - name: station_id
+        tests:
+          - not_null
+      - name: country_code
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              values: [openmeteo, openaq, waqi]
+      - name: has_who_exceedance
+        tests:
+          - accepted_values:
+              values: [0, 1]
+              quote: false
+      - name: current_exceedance_streak_days
+        tests:
+          - not_null
+          - accepted_range:
+              min_value: 0
+      - name: mart_ts
         tests:
           - not_null

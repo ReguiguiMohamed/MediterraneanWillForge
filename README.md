@@ -41,6 +41,9 @@ The pipeline writes:
 ## Pipeline Output
 
 Charts generated from live Gold tables on Backblaze B2. See [`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb) for the full analysis.
+The report also writes `docs/reporting_readiness.csv` and excludes
+coverage-shifted fresh partitions from public charts until their station/source
+mix is comparable with the recent reporting baseline.
 
 **Station coverage — country × date**
 ![Coverage heatmap](docs/coverage_heatmap.png)
@@ -321,6 +324,10 @@ black==26.3.1
   beyond the first unique combination per metric name. All metrics use flat
   per-stage names (e.g. `med_ops_silver_rows`) rather than shared names with
   label dimensions to stay within the free-tier limit.
+- **Static report freshness:** WAQI is a current-readings source and upstream
+  station coverage can shift on the freshest partition. Public report charts use
+  anomaly rates rather than raw anomaly counts and exclude coverage-shifted dates
+  flagged in `docs/reporting_readiness.csv`; the lake still keeps all real rows.
 - **Local dev alerting:** `monitoring/alertmanager/alertmanager.yml` uses
   `localhost:5001` webhook stubs — local dev does not send real alerts. Grafana
   Cloud contact points handle production alerting.
@@ -329,6 +336,9 @@ black==26.3.1
   protects against `:latest` drift; digest pinning would add supply-chain
   protection against tag rewrites and is deferred.
 - **No Kubernetes, secrets manager, or production SLAs.**
+- **No paid managed-service dependency.** Grafana Cloud is useful while the free
+  plan is available, but static repo-owned charts and reports remain the durable
+  portfolio surface.
 
 ## Design Rules
 
@@ -338,6 +348,8 @@ black==26.3.1
 - Pushgateway and Grafana remote_write pushes are best-effort and wrapped in `try/except`.
 - Bronze idempotency and Silver incremental processing are partition-based.
 - Canonical Silver schema and source labels (`openmeteo`, `openaq`, `waqi`) are frozen.
+- Public analytics should be understandable without Grafana Cloud; prefer static
+  charts in `docs/` with clear titles, rates, and coverage diagnostics.
 - Commits are clean: no AI co-author lines.
 
 ## Acknowledgements
