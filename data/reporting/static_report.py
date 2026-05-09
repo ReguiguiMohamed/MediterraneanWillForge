@@ -98,9 +98,7 @@ def plot_anomaly_detection(
 
     ax = axes[2]
     normal = public_anomalies.loc[public_anomalies["is_anomaly"] == 0, "anomaly_score"]
-    flagged = public_anomalies.loc[
-        public_anomalies["is_anomaly"] == 1, "anomaly_score"
-    ]
+    flagged = public_anomalies.loc[public_anomalies["is_anomaly"] == 1, "anomaly_score"]
     ax.hist(
         normal,
         bins=30,
