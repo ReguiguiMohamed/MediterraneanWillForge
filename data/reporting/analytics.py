@@ -56,7 +56,9 @@ def coverage_by_date(summary: pd.DataFrame) -> pd.DataFrame:
         countries=("country_code", "nunique"),
         source_count=("source", "nunique"),
     ).reset_index()
-    source_labels = grouped["source"].apply(lambda s: ", ".join(sorted(s.dropna().unique())))
+    source_labels = grouped["source"].apply(
+        lambda s: ", ".join(sorted(s.dropna().unique()))
+    )
     coverage = coverage.merge(
         source_labels.rename("sources").reset_index(),
         on="partition_date",
@@ -141,4 +143,3 @@ def write_readiness_diagnostics(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     diagnostics.to_csv(output_path, index=False)
     return diagnostics
-

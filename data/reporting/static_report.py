@@ -101,7 +101,13 @@ def plot_anomaly_detection(
     flagged = public_anomalies.loc[
         public_anomalies["is_anomaly"] == 1, "anomaly_score"
     ]
-    ax.hist(normal, bins=30, color="#16a34a", alpha=0.72, label=f"Normal ({len(normal):,})")
+    ax.hist(
+        normal,
+        bins=30,
+        color="#16a34a",
+        alpha=0.72,
+        label=f"Normal ({len(normal):,})",
+    )
     ax.hist(
         flagged,
         bins=15,
@@ -125,7 +131,9 @@ def plot_anomaly_detection(
     plt.close(fig)
 
 
-def plot_source_coverage(summary: pd.DataFrame, ready_dates: set[str], output_path: Path) -> None:
+def plot_source_coverage(
+    summary: pd.DataFrame, ready_dates: set[str], output_path: Path
+) -> None:
     public_summary = summary[summary["partition_date"].isin(ready_dates)].copy()
     if public_summary.empty:
         return
@@ -143,7 +151,14 @@ def plot_source_coverage(summary: pd.DataFrame, ready_dates: set[str], output_pa
     left = np.zeros(len(coverage))
     for idx, src in enumerate(coverage.columns):
         vals = coverage[src].values
-        ax.barh(coverage.index, vals, left=left, label=src, color=PALETTE[idx % len(PALETTE)], alpha=0.86)
+        ax.barh(
+            coverage.index,
+            vals,
+            left=left,
+            label=src,
+            color=PALETTE[idx % len(PALETTE)],
+            alpha=0.86,
+        )
         left += vals
     ax.set_xlabel("Station-days")
     ax.set_title("Station Coverage by Source", fontweight="bold")
@@ -154,7 +169,14 @@ def plot_source_coverage(summary: pd.DataFrame, ready_dates: set[str], output_pa
     left = np.zeros(len(pct))
     for idx, src in enumerate(pct.columns):
         vals = pct[src].values
-        ax.barh(pct.index, vals, left=left, label=src, color=PALETTE[idx % len(PALETTE)], alpha=0.86)
+        ax.barh(
+            pct.index,
+            vals,
+            left=left,
+            label=src,
+            color=PALETTE[idx % len(PALETTE)],
+            alpha=0.86,
+        )
         left += vals
     ax.set_xlabel("Share of station-days")
     ax.set_title("Source Mix by Country", fontweight="bold")
