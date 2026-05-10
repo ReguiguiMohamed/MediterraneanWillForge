@@ -231,3 +231,9 @@ jobs:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: python -c "from data.ingestion.gold.anomaly import run; run()"
+
+      - name: Trigger report update
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: update-report-images
