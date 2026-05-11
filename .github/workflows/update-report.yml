@@ -24,14 +24,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r docker/ingestion/requirements.txt
 
-      - name: Run notebook and save images
-        env:
-          MINIO_ENDPOINT: https://s3.eu-central-003.backblazeb2.com
-          MINIO_BUCKET_GOLD: med-ops-mohamed-gold
-          AWS_REGION: eu-central-003
-          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
-          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-        run: |
+       - name: Run notebook and save images
+         env:
+           MINIO_ENDPOINT: https://s3.eu-central-003.backblazeb2.com
+           MINIO_BUCKET_GOLD: med-ops-mohamed-gold
+           AWS_REGION: eu-central-003
+           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+           PYTHONPATH: "."
+         run: |
           python - <<'EOF'
           import subprocess
           import sys

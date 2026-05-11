@@ -51,6 +51,8 @@ jobs:
   run-pipeline:
     name: Full Pipeline Run
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
