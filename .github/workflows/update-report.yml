@@ -6,13 +6,33 @@ on:
     types: [completed]
   workflow_dispatch:
 
+concurrency:
+  group: update-report-images
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
 jobs:
   update-report:
-    name: Run Notebook and Update Images
+    name: Run Notebook and Commit Report Artifacts
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      MINIO_ENDPOINT: https://s3.eu-central-003.backblazeb2.com
+      MINIO_BUCKET_GOLD: med-ops-mohamed-gold
+      AWS_REGION: eu-central-003
+      MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+      MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+      PYTHONPATH: ${{ github.workspace }}
+
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -22,49 +42,43 @@ jobs:
           cache-dependency-path: docker/ingestion/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r docker/ingestion/requirements.txt
-
-       - name: Run notebook and save images
-         env:
-           MINIO_ENDPOINT: https://s3.eu-central-003.backblazeb2.com
-           MINIO_BUCKET_GOLD: med-ops-mohamed-gold
-           AWS_REGION: eu-central-003
-           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
-           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-           PYTHONPATH: "."
-         run: |
-          python - <<'EOF'
-          import subprocess
-          import sys
-          subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "matplotlib", "numpy", "pandas", "python-dotenv", "deltalake", "nbformat", "nbconvert"], check=False)
-          EOF
-          jupyter nbconvert --to notebook --execute docs/pipeline_report.ipynb --output docs/pipeline_report_executed.ipynb
-          python - <<'EOF'
-          import json
-          import os
-          with open("docs/pipeline_report_executed.ipynb", "r", encoding="utf-8") as f:
-              nb = json.load(f)
-          images = ["coverage_heatmap.png", "who_exceedance.png", "wildfire_risk.png", "pollutants_by_country.png", "anomaly_detection.png", "source_coverage.png"]
-          for cell in nb["cells"]:
-              if cell["cell_type"] == "code" and "outputs" in cell:
-                  for out in cell["outputs"]:
-                      if "image/png" in out.get("data", {}):
-                          img_data = out["data"]["image/png"]
-                          img_name = None
-                          for img in images:
-                              if img in cell.get("source", ""):
-                                  img_name = img
-                                  break
-                          if img_name:
-                              with open(f"docs/{img_name}", "wb") as f:
-                                  import base64
-                                  f.write(base64.b64decode(img_data))
-          EOF
-
-      - name: Commit and push updated images
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git add docs/*.png
-          git diff --quiet && git diff --staged --quiet || git commit -m "chore: update report images"
-          git push
+          pip install -r docker/ingestion/requirements.txt
+          pip install matplotlib numpy python-dotenv nbconvert nbformat ipykernel
+
+      - name: Execute report notebook
+        working-directory: docs
+        run: |
+          jupyter nbconvert \
+            --to notebook \
+            --execute pipeline_report.ipynb \
+            --output pipeline_report \
+            --ExecutePreprocessor.timeout=900
+
+      - name: Render report HTML
+        working-directory: docs
+        run: |
+          jupyter nbconvert \
+            --to html pipeline_report.ipynb \
+            --output pipeline_report
+
+      - name: Commit updated report artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            docs/pipeline_report.ipynb \
+            docs/pipeline_report.html \
+            docs/reporting_readiness.csv \
+            docs/coverage_heatmap.png \
+            docs/who_exceedance.png \
+            docs/wildfire_risk.png \
+            docs/pollutants_by_country.png \
+            docs/anomaly_detection.png \
+            docs/source_coverage.png
+          if git diff --cached --quiet; then
+            echo "No report artifact changes to commit."
+          else
+            git commit -m "chore: update report artifacts"
+            git push
+          fi
