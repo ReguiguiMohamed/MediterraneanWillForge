@@ -41,6 +41,8 @@ The pipeline writes:
 ## Pipeline Output
 
 Charts generated from live Gold tables on Backblaze B2. See [`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb) for the full analysis.
+This reporting surface is regenerated automatically each day after the scheduled
+pipeline run completes successfully.
 The report also writes `docs/reporting_readiness.csv` and excludes
 coverage-shifted fresh partitions from public charts until their station/source
 mix is comparable with the recent reporting baseline.
