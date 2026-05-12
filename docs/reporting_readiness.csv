@@ -1,8 +1,8 @@
 partition_date,station_days,countries,source_count,sources,coverage_baseline_station_days,coverage_ratio,is_reporting_ready,anomaly_flags,rows,anomaly_rate_pct
 2026-03-31,10,9,1,openmeteo,,,True,1,10,10.0
-2026-04-01,9,8,1,openmeteo,,,True,1,9,11.11
+2026-04-01,9,8,1,openmeteo,,,True,0,9,0.0
 2026-04-02,9,8,1,openmeteo,,,True,1,9,11.11
-2026-04-03,10,9,1,openmeteo,9.0,1.111,True,2,10,20.0
+2026-04-03,10,9,1,openmeteo,9.0,1.111,True,1,10,10.0
 2026-04-04,9,8,1,openmeteo,9.5,0.947,True,1,9,11.11
 2026-04-05,9,8,1,openmeteo,9.0,1.0,True,0,9,0.0
 2026-04-06,10,9,1,openmeteo,9.0,1.111,True,0,10,0.0
@@ -25,7 +25,7 @@ partition_date,station_days,countries,source_count,sources,coverage_baseline_sta
 2026-04-23,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
 2026-04-24,9,9,1,openmeteo,10.0,0.9,True,1,9,11.11
 2026-04-25,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
-2026-04-26,10,9,1,openmeteo,10.0,1.0,True,1,10,10.0
+2026-04-26,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
 2026-04-27,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
 2026-04-28,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
 2026-04-29,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
@@ -33,9 +33,11 @@ partition_date,station_days,countries,source_count,sources,coverage_baseline_sta
 2026-05-01,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
 2026-05-02,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
 2026-05-03,10,9,1,openmeteo,10.0,1.0,True,0,10,0.0
-2026-05-04,58,9,2,"openaq, openmeteo",10.0,5.8,False,3,58,5.17
-2026-05-05,77,9,3,"openaq, openmeteo, waqi",10.0,7.7,False,13,77,16.88
-2026-05-06,75,9,3,"openaq, openmeteo, waqi",10.0,7.5,False,12,75,16.0
-2026-05-07,77,9,3,"openaq, openmeteo, waqi",10.0,7.7,False,12,77,15.58
-2026-05-08,78,9,3,"openaq, openmeteo, waqi",58.0,1.345,True,9,77,11.69
-2026-05-09,77,9,3,"openaq, openmeteo, waqi",75.0,1.027,True,10,73,13.7
+2026-05-04,58,9,2,"openaq, openmeteo",10.0,5.8,False,2,58,3.45
+2026-05-05,77,9,3,"openaq, openmeteo, waqi",10.0,7.7,False,10,77,12.99
+2026-05-06,75,9,3,"openaq, openmeteo, waqi",10.0,7.5,False,9,75,12.0
+2026-05-07,77,9,3,"openaq, openmeteo, waqi",10.0,7.7,False,11,77,14.29
+2026-05-08,78,9,3,"openaq, openmeteo, waqi",58.0,1.345,True,8,77,10.39
+2026-05-09,77,9,3,"openaq, openmeteo, waqi",75.0,1.027,True,10,76,13.16
+2026-05-10,54,9,3,"openaq, openmeteo, waqi",77.0,0.701,True,8,53,15.09
+2026-05-11,73,9,3,"openaq, openmeteo, waqi",77.0,0.948,True,9,68,13.24
