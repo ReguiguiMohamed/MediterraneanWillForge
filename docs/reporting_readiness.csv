@@ -1,5 +1,5 @@
 partition_date,station_days,countries,source_count,sources,coverage_baseline_station_days,coverage_ratio,is_reporting_ready,anomaly_flags,rows,anomaly_rate_pct
-2026-03-31,10,9,1,openmeteo,,,True,1,10,10.0
+2026-03-31,10,9,1,openmeteo,,,True,0,10,0.0
 2026-04-01,9,8,1,openmeteo,,,True,0,9,0.0
 2026-04-02,9,8,1,openmeteo,,,True,0,9,0.0
 2026-04-03,10,9,1,openmeteo,9.0,1.111,True,0,10,0.0
@@ -36,10 +36,11 @@ partition_date,station_days,countries,source_count,sources,coverage_baseline_sta
 2026-05-04,58,9,2,"openaq, openmeteo",10.0,5.8,False,2,58,3.45
 2026-05-05,77,9,3,"openaq, openmeteo, waqi",10.0,7.7,False,7,77,9.09
 2026-05-06,75,9,3,"openaq, openmeteo, waqi",10.0,7.5,False,10,75,13.33
-2026-05-07,77,9,3,"openaq, openmeteo, waqi",10.0,7.7,False,10,77,12.99
+2026-05-07,77,9,3,"openaq, openmeteo, waqi",10.0,7.7,False,11,77,14.29
 2026-05-08,78,9,3,"openaq, openmeteo, waqi",58.0,1.345,True,7,77,9.09
-2026-05-09,77,9,3,"openaq, openmeteo, waqi",75.0,1.027,True,7,76,9.21
+2026-05-09,77,9,3,"openaq, openmeteo, waqi",75.0,1.027,True,8,76,10.53
 2026-05-10,54,9,3,"openaq, openmeteo, waqi",77.0,0.701,True,7,54,12.96
-2026-05-11,73,9,3,"openaq, openmeteo, waqi",77.0,0.948,True,10,71,14.08
+2026-05-11,73,9,3,"openaq, openmeteo, waqi",77.0,0.948,True,10,72,13.89
 2026-05-12,89,9,3,"openaq, openmeteo, waqi",77.0,1.156,True,11,82,13.41
-2026-05-13,82,9,3,"openaq, openmeteo, waqi",77.0,1.065,True,7,80,8.75
+2026-05-13,82,9,3,"openaq, openmeteo, waqi",77.0,1.065,True,7,81,8.64
+2026-05-14,82,9,3,"openaq, openmeteo, waqi",77.0,1.065,True,5,81,6.17
