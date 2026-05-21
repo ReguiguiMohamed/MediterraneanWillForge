@@ -63,9 +63,7 @@ def plot_anomaly_detection(
     if anomalies.empty:
         return
 
-    public_anomalies = anomalies[
-        anomalies["partition_date"].isin(display_dates)
-    ].copy()
+    public_anomalies = anomalies[anomalies["partition_date"].isin(display_dates)].copy()
     rates = anomaly_daily_rates(public_anomalies)
 
     fig, axes = plt.subplots(
