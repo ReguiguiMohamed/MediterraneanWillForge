@@ -9,6 +9,7 @@ from deltalake import DeltaTable
 from data.storage import delta_storage_options
 
 EXCLUDED_COUNTRIES = {"CL", "FR", "GB", "NL", "LY"}
+DEFAULT_PUBLIC_DATE_WINDOW = 45
 
 
 def filter_report_countries(df: pd.DataFrame) -> pd.DataFrame:
@@ -117,6 +118,22 @@ def reporting_dates(summary: pd.DataFrame) -> set[str]:
     return set(
         coverage.loc[coverage["is_reporting_ready"], "partition_date"].astype(str)
     )
+
+
+def latest_reporting_dates(
+    summary: pd.DataFrame,
+    *,
+    max_dates: int = DEFAULT_PUBLIC_DATE_WINDOW,
+) -> list[str]:
+    """Return the latest stable dates for dense public time-series charts.
+
+    Full historical data remains in the lake and diagnostics. This helper only
+    limits charts where every additional day adds another axis label or heatmap
+    column.
+    """
+    if max_dates < 1:
+        raise ValueError("max_dates must be at least 1")
+    return sorted(reporting_dates(summary))[-max_dates:]
 
 
 def read_gold_table(table: str) -> pd.DataFrame:

@@ -3,6 +3,7 @@ import pandas as pd
 from data.reporting.analytics import (
     anomaly_daily_rates,
     coverage_by_date,
+    latest_reporting_dates,
     mark_coverage_readiness,
     reporting_dates,
 )
@@ -52,6 +53,22 @@ def test_reporting_dates_excludes_unready_coverage_date():
 
     assert "2026-05-07" not in dates
     assert "2026-05-06" in dates
+
+
+def test_latest_reporting_dates_keeps_recent_stable_window():
+    summary = pd.DataFrame(
+        {
+            "partition_date": [f"2026-05-{day:02d}" for day in range(1, 11)],
+            "country_code": ["TN"] * 10,
+            "source": ["openmeteo"] * 10,
+            "station_count": [20, 21, 19, 20, 22, 21, 20, 19, 100, 21],
+        }
+    )
+
+    dates = latest_reporting_dates(summary, max_dates=4)
+
+    assert dates == ["2026-05-06", "2026-05-07", "2026-05-08", "2026-05-10"]
+    assert "2026-05-09" not in dates
 
 
 def test_coverage_by_date_tracks_source_mix():
