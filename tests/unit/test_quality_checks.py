@@ -213,13 +213,16 @@ def test_value_range_respects_mostly():
 
 
 def test_valid_values_passes(bronze_df):
-    r = check_valid_values(bronze_df, "bronze", "t", "source", {"openmeteo", "openaq"})
+    bronze_df = bronze_df.assign(source=["openmeteo", "openaq", "waqi"])
+    r = check_valid_values(
+        bronze_df, "bronze", "t", "source", {"openmeteo", "openaq", "waqi"}
+    )
     assert r.passed
 
 
 def test_valid_values_fails_on_unknown():
     df = pd.DataFrame({"source": ["openmeteo", "synthetic"]})
-    r = check_valid_values(df, "bronze", "t", "source", {"openmeteo", "openaq"})
+    r = check_valid_values(df, "bronze", "t", "source", {"openmeteo", "openaq", "waqi"})
     assert not r.passed
 
 
@@ -251,7 +254,21 @@ def test_bronze_suite_all_pass(bronze_df):
     assert len(failures) == 0, [r.check_name for r in failures]
 
 
+def test_bronze_suite_accepts_waqi_source(bronze_df):
+    bronze_df = bronze_df.assign(source=["waqi"] * len(bronze_df))
+    results = run_bronze_checks(bronze_df, "waqi")
+    failures = [r for r in results if not r.passed and r.severity == "fail"]
+    assert len(failures) == 0, [r.check_name for r in failures]
+
+
 def test_silver_suite_all_pass(silver_df):
+    results = run_silver_checks(silver_df)
+    failures = [r for r in results if not r.passed and r.severity == "fail"]
+    assert len(failures) == 0, [r.check_name for r in failures]
+
+
+def test_silver_suite_accepts_waqi_source(silver_df):
+    silver_df = silver_df.assign(source=["waqi"] * len(silver_df))
     results = run_silver_checks(silver_df)
     failures = [r for r in results if not r.passed and r.severity == "fail"]
     assert len(failures) == 0, [r.check_name for r in failures]

@@ -61,7 +61,7 @@ checks for air_quality:
 
   - invalid_count(source) = 0:
       name: source_valid_values
-      valid values: [openmeteo, openaq]
+      valid values: [openmeteo, openaq, waqi]
 
   # ── Data completeness score ─────────────────────────────────────────────────
   - min(data_completeness) >= 0.2:

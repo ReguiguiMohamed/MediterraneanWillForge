@@ -47,6 +47,8 @@ try:
 except ImportError:  # Great Expectations 0.18 compatibility.
     ProgressBarsConfig = None
 
+VALID_SOURCES = {"openmeteo", "openaq", "waqi"}
+
 # ── Storage config ─────────────────────────────────────────────────────────────
 
 
@@ -438,7 +440,7 @@ def run_bronze_checks(
             layer,
             table,
             "source",
-            valid_set={"openmeteo", "openaq"},
+            valid_set=VALID_SOURCES,
             validator=validator,
         )
     )
@@ -517,7 +519,7 @@ def run_silver_checks(df: pd.DataFrame) -> list[CheckResult]:
             layer,
             table,
             "source",
-            valid_set={"openmeteo", "openaq"},
+            valid_set=VALID_SOURCES,
             validator=validator,
         )
     )
@@ -599,23 +601,15 @@ def run() -> int:
     t_start = time.monotonic()
     all_results: list[CheckResult] = []
 
-    # ── Bronze: openmeteo ─────────────────────────────────────────────────────
-    path = f"s3://{bronze_bucket}/openmeteo/air_quality"
-    df = load_recent_partition(path, storage_opts, lookback)
-    if df.empty:
-        logger.warning("[bronze/openmeteo] No recent data found — skipping checks.")
-    else:
-        logger.info(f"[bronze/openmeteo] Loaded {len(df)} rows.")
-        all_results.extend(run_bronze_checks(df, "openmeteo"))
-
-    # ── Bronze: openaq ────────────────────────────────────────────────────────
-    path = f"s3://{bronze_bucket}/openaq/air_quality"
-    df = load_recent_partition(path, storage_opts, lookback)
-    if df.empty:
-        logger.warning("[bronze/openaq] No recent data found — skipping checks.")
-    else:
-        logger.info(f"[bronze/openaq] Loaded {len(df)} rows.")
-        all_results.extend(run_bronze_checks(df, "openaq"))
+    # ── Bronze sources ────────────────────────────────────────────────────────
+    for source in sorted(VALID_SOURCES):
+        path = f"s3://{bronze_bucket}/{source}/air_quality"
+        df = load_recent_partition(path, storage_opts, lookback)
+        if df.empty:
+            logger.warning(f"[bronze/{source}] No recent data found — skipping checks.")
+        else:
+            logger.info(f"[bronze/{source}] Loaded {len(df)} rows.")
+            all_results.extend(run_bronze_checks(df, source))
 
     # ── Silver ────────────────────────────────────────────────────────────────
     path = f"s3://{silver_bucket}/air_quality"
