@@ -26,6 +26,7 @@ import time
 import warnings
 from dataclasses import dataclass
 from datetime import date, timedelta
+from inspect import signature
 from typing import Any
 
 import great_expectations as gx
@@ -64,6 +65,7 @@ def _gx_context() -> Any:
     config_kwargs: dict[str, Any] = {
         "config_version": 3.0,
         "analytics_enabled": False,
+        "anonymous_usage_statistics": {"enabled": False},
         "store_backend_defaults": InMemoryStoreBackendDefaults(),
     }
     if ProgressBarsConfig is not None:
@@ -72,7 +74,12 @@ def _gx_context() -> Any:
             metric_calculations=False,
         )
 
-    return gx.get_context(project_config=DataContextConfig(**config_kwargs))
+    supported_kwargs = set(signature(DataContextConfig).parameters)
+    filtered_kwargs = {
+        key: value for key, value in config_kwargs.items() if key in supported_kwargs
+    }
+
+    return gx.get_context(project_config=DataContextConfig(**filtered_kwargs))
 
 
 def _gx_validator(df: pd.DataFrame, suite_name: str) -> Any:

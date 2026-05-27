@@ -8,6 +8,7 @@ Prometheus connection required.
 import pandas as pd
 import pytest
 
+import data.quality.run_checks as run_checks
 from data.quality.run_checks import (
     check_data_completeness_floor,
     check_null_rate,
@@ -127,6 +128,33 @@ def test_required_columns_uses_great_expectations_validator():
 
     assert validator.columns == ["station_id", "blocked_by_ge"]
     assert [r.passed for r in results] == [True, False]
+
+
+def test_gx_context_filters_version_specific_config_kwargs(monkeypatch):
+    class LegacyDataContextConfig:
+        def __init__(
+            self,
+            config_version=None,
+            anonymous_usage_statistics=None,
+            store_backend_defaults=None,
+        ):
+            self.kwargs = {
+                "config_version": config_version,
+                "anonymous_usage_statistics": anonymous_usage_statistics,
+                "store_backend_defaults": store_backend_defaults,
+            }
+
+    def fake_get_context(project_config):
+        return project_config
+
+    monkeypatch.setattr(run_checks, "DataContextConfig", LegacyDataContextConfig)
+    monkeypatch.setattr(run_checks.gx, "get_context", fake_get_context)
+
+    context = run_checks._gx_context()
+
+    assert context.kwargs["config_version"] == 3.0
+    assert context.kwargs["anonymous_usage_statistics"] == {"enabled": False}
+    assert context.kwargs["store_backend_defaults"] is not None
 
 
 # ── check_null_rate ────────────────────────────────────────────────────────────
