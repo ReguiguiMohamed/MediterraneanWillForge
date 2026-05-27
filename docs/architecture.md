@@ -156,7 +156,7 @@ Profile-gated pipeline jobs (activated with `--profile jobs` or `make ingest`):
 | Service | Purpose |
 |---|---|
 | `ingestion` | Bronze ingestors + Silver transformer + Gold mart builder |
-| `quality` | Data quality runner |
+| `quality` | Great Expectations-backed data quality runner |
 
 Startup order is enforced via healthchecks and `depends_on` conditions:
 `pushgateway` healthy before `prometheus` starts; `prometheus` healthy before

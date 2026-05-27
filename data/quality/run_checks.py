@@ -3,9 +3,9 @@ data/quality/run_checks.py
 ───────────────────────────
 Data quality runner for Bronze and Silver Delta Lake tables.
 
-Reads the most recent partition of each table, executes a suite of
-named checks, logs results, pushes failure counts to Prometheus
-Pushgateway, and exits non-zero if any hard-fail threshold is breached.
+Reads the most recent partition of each table, evaluates Great Expectations
+expectations, logs results, pushes failure counts to Prometheus Pushgateway,
+and exits non-zero if any hard-fail threshold is breached.
 
 Called by the quality Docker image:
   python -m quality.run_checks
@@ -23,21 +23,120 @@ from __future__ import annotations
 import os
 import sys
 import time
+import warnings
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any
 
+import great_expectations as gx
 import pandas as pd
 from deltalake import DeltaTable
+from great_expectations.core.expectation_suite import ExpectationSuite
+from great_expectations.data_context.types.base import (
+    DataContextConfig,
+    InMemoryStoreBackendDefaults,
+)
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
 from data.storage import delta_storage_options
+
+try:
+    from great_expectations.data_context.types.base import ProgressBarsConfig
+except ImportError:  # Great Expectations 0.18 compatibility.
+    ProgressBarsConfig = None
 
 # ── Storage config ─────────────────────────────────────────────────────────────
 
 
 def _storage_options() -> dict[str, str]:
     return delta_storage_options()
+
+
+def _expectation_suite(name: str) -> ExpectationSuite:
+    try:
+        return ExpectationSuite(name=name)
+    except TypeError:
+        return ExpectationSuite(expectation_suite_name=name)
+
+
+def _gx_context() -> Any:
+    config_kwargs: dict[str, Any] = {
+        "config_version": 3.0,
+        "analytics_enabled": False,
+        "store_backend_defaults": InMemoryStoreBackendDefaults(),
+    }
+    if ProgressBarsConfig is not None:
+        config_kwargs["progress_bars"] = ProgressBarsConfig(
+            globally=False,
+            metric_calculations=False,
+        )
+
+    return gx.get_context(project_config=DataContextConfig(**config_kwargs))
+
+
+def _gx_validator(df: pd.DataFrame, suite_name: str) -> Any:
+    context = _gx_context()
+
+    # Great Expectations 0.18 fluent API returns a Validator here.
+    sources = getattr(context, "sources", None)
+    if sources is not None:
+        try:
+            validator = sources.pandas_default.read_dataframe(df)
+            if hasattr(validator, "expect_column_to_exist"):
+                return validator
+        except Exception:
+            pass
+        try:
+            datasource = sources.add_pandas(name=f"{suite_name}_pandas")
+            validator = datasource.read_dataframe(df)
+            if hasattr(validator, "expect_column_to_exist"):
+                return validator
+        except Exception:
+            pass
+
+    datasource_name = f"{suite_name}_pandas"
+    asset_name = f"{suite_name}_asset"
+
+    # Great Expectations 1.x returns a Batch from read_dataframe, so build the
+    # Validator explicitly.
+    datasource = context.data_sources.add_pandas(name=datasource_name)
+    asset = datasource.add_dataframe_asset(name=asset_name)
+    batch_definition = asset.add_batch_definition_whole_dataframe("batch")
+    batch = batch_definition.get_batch(batch_parameters={"dataframe": df})
+    return context.get_validator(
+        batch=batch,
+        expectation_suite=_expectation_suite(suite_name),
+    )
+
+
+def _ensure_gx_validator(
+    validator: Any | None,
+    df: pd.DataFrame,
+    layer: str,
+    table: str,
+) -> Any:
+    if validator is not None:
+        return validator
+    suite_name = f"{layer}_{table}".replace("/", "_")
+    return _gx_validator(df, suite_name)
+
+
+def _gx_expectation(method: Any, *args: Any, **kwargs: Any) -> Any:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="`result_format` configured at the Validator-level.*",
+            category=UserWarning,
+        )
+        return method(*args, **kwargs)
+
+
+def _gx_success(result: Any) -> bool:
+    success = getattr(result, "success", None)
+    if success is None and isinstance(result, dict):
+        success = result.get("success")
+    return bool(success)
 
 
 # ── Check result ───────────────────────────────────────────────────────────────
@@ -61,8 +160,14 @@ def check_row_count(
     layer: str,
     table: str,
     min_rows: int = 1,
+    validator: Any | None = None,
 ) -> CheckResult:
-    passed = len(df) >= min_rows
+    gx_validator = _ensure_gx_validator(validator, df, layer, table)
+    expectation = _gx_expectation(
+        gx_validator.expect_table_row_count_to_be_between,
+        min_value=min_rows,
+    )
+    passed = _gx_success(expectation)
     return CheckResult(
         check_name="row_count_non_zero",
         layer=layer,
@@ -78,10 +183,13 @@ def check_required_columns(
     layer: str,
     table: str,
     required: list[str],
+    validator: Any | None = None,
 ) -> list[CheckResult]:
+    gx_validator = _ensure_gx_validator(validator, df, layer, table)
     results = []
     for col in required:
-        present = col in df.columns
+        expectation = _gx_expectation(gx_validator.expect_column_to_exist, col)
+        present = _gx_success(expectation)
         results.append(
             CheckResult(
                 check_name=f"column_exists_{col}",
@@ -102,6 +210,7 @@ def check_null_rate(
     col: str,
     warn_threshold: float = 0.30,
     fail_threshold: float = 0.70,
+    validator: Any | None = None,
 ) -> CheckResult:
     if col not in df.columns:
         return CheckResult(
@@ -112,6 +221,12 @@ def check_null_rate(
             severity="fail",
             detail=f"column '{col}' missing",
         )
+    gx_validator = _ensure_gx_validator(validator, df, layer, table)
+    _gx_expectation(
+        gx_validator.expect_column_values_to_not_be_null,
+        col,
+        mostly=max(0.0, 1.0 - fail_threshold),
+    )
     null_rate = df[col].isna().mean()
     if null_rate >= fail_threshold:
         return CheckResult(
@@ -149,6 +264,7 @@ def check_value_range(
     min_val: float | None = None,
     max_val: float | None = None,
     mostly: float = 0.99,
+    validator: Any | None = None,
 ) -> CheckResult:
     if col not in df.columns:
         return CheckResult(
@@ -169,13 +285,21 @@ def check_value_range(
             severity="warn",
             detail="no non-null values to check",
         )
+    gx_validator = _ensure_gx_validator(validator, df, layer, table)
+    expectation = _gx_expectation(
+        gx_validator.expect_column_values_to_be_between,
+        col,
+        min_value=min_val,
+        max_value=max_val,
+        mostly=mostly,
+    )
     mask = pd.Series([True] * len(series), index=series.index)
     if min_val is not None:
         mask &= series >= min_val
     if max_val is not None:
         mask &= series <= max_val
     compliance = mask.mean()
-    passed = compliance >= mostly
+    passed = _gx_success(expectation)
     return CheckResult(
         check_name=f"range_{col}",
         layer=layer,
@@ -192,6 +316,7 @@ def check_valid_values(
     table: str,
     col: str,
     valid_set: set[str],
+    validator: Any | None = None,
 ) -> CheckResult:
     if col not in df.columns:
         return CheckResult(
@@ -202,8 +327,14 @@ def check_valid_values(
             severity="warn",
             detail=f"column '{col}' missing",
         )
+    gx_validator = _ensure_gx_validator(validator, df, layer, table)
+    expectation = _gx_expectation(
+        gx_validator.expect_column_values_to_be_in_set,
+        col,
+        value_set=sorted(valid_set),
+    )
     invalid = df[col].dropna()[~df[col].dropna().isin(valid_set)]
-    passed = len(invalid) == 0
+    passed = _gx_success(expectation)
     return CheckResult(
         check_name=f"valid_values_{col}",
         layer=layer,
@@ -220,6 +351,7 @@ def check_data_completeness_floor(
     table: str,
     col: str = "data_completeness",
     floor: float = 0.20,
+    validator: Any | None = None,
 ) -> CheckResult:
     if col not in df.columns:
         return CheckResult(
@@ -230,8 +362,14 @@ def check_data_completeness_floor(
             severity="warn",
             detail="column absent — skipped",
         )
+    gx_validator = _ensure_gx_validator(validator, df, layer, table)
+    expectation = _gx_expectation(
+        gx_validator.expect_column_values_to_be_between,
+        col,
+        min_value=floor,
+    )
     below = (df[col] < floor).sum()
-    passed = below == 0
+    passed = _gx_success(expectation)
     return CheckResult(
         check_name="data_completeness_floor",
         layer=layer,
@@ -252,8 +390,9 @@ def run_bronze_checks(
     layer = "bronze"
     table = f"bronze/{source}/air_quality"
     results: list[CheckResult] = []
+    validator = _gx_validator(df, f"{layer}_{source}_air_quality")
 
-    results.append(check_row_count(df, layer, table))
+    results.append(check_row_count(df, layer, table, validator=validator))
     results.extend(
         check_required_columns(
             df,
@@ -267,15 +406,24 @@ def run_bronze_checks(
                 "partition_date",
                 "source",
             ],
+            validator=validator,
         )
     )
     for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
         results.append(
             check_null_rate(
-                df, layer, table, col, warn_threshold=0.40, fail_threshold=0.80
+                df,
+                layer,
+                table,
+                col,
+                warn_threshold=0.40,
+                fail_threshold=0.80,
+                validator=validator,
             )
         )
-        results.append(check_value_range(df, layer, table, col, min_val=0))
+        results.append(
+            check_value_range(df, layer, table, col, min_val=0, validator=validator)
+        )
 
     results.append(
         check_valid_values(
@@ -284,6 +432,7 @@ def run_bronze_checks(
             table,
             "source",
             valid_set={"openmeteo", "openaq"},
+            validator=validator,
         )
     )
     return results
@@ -293,8 +442,9 @@ def run_silver_checks(df: pd.DataFrame) -> list[CheckResult]:
     layer = "silver"
     table = "silver/air_quality"
     results: list[CheckResult] = []
+    validator = _gx_validator(df, f"{layer}_air_quality")
 
-    results.append(check_row_count(df, layer, table))
+    results.append(check_row_count(df, layer, table, validator=validator))
     results.extend(
         check_required_columns(
             df,
@@ -317,15 +467,24 @@ def run_silver_checks(df: pd.DataFrame) -> list[CheckResult]:
                 "silver_ts",
                 "partition_date",
             ],
+            validator=validator,
         )
     )
     for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
         results.append(
             check_null_rate(
-                df, layer, table, col, warn_threshold=0.30, fail_threshold=0.70
+                df,
+                layer,
+                table,
+                col,
+                warn_threshold=0.30,
+                fail_threshold=0.70,
+                validator=validator,
             )
         )
-        results.append(check_value_range(df, layer, table, col, min_val=0))
+        results.append(
+            check_value_range(df, layer, table, col, min_val=0, validator=validator)
+        )
 
     results.append(
         check_valid_values(
@@ -342,6 +501,7 @@ def run_silver_checks(df: pd.DataFrame) -> list[CheckResult]:
                 "hazardous",
                 "unknown",
             },
+            validator=validator,
         )
     )
     results.append(
@@ -351,9 +511,10 @@ def run_silver_checks(df: pd.DataFrame) -> list[CheckResult]:
             table,
             "source",
             valid_set={"openmeteo", "openaq"},
+            validator=validator,
         )
     )
-    results.append(check_data_completeness_floor(df, layer, table))
+    results.append(check_data_completeness_floor(df, layer, table, validator=validator))
     return results
 
 

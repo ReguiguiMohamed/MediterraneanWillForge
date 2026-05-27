@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir \
 
 # Paths relative to repo root (build context)
 COPY data/quality/  ./quality/
+COPY data/__init__.py data/storage.py ./data/
 COPY data/schemas/  ./schemas/
 
 RUN useradd -m -u 1001 medops && chown -R medops:medops /app

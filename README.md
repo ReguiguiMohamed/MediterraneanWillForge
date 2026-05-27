@@ -97,7 +97,7 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 | Data pipeline | Python 3.11, pandas, pyarrow, deltalake |
 | Transformation | Bronze → Silver → Gold Python jobs |
 | ML | scikit-learn `IsolationForest` — anomaly detection on Silver PM2.5 / O3 / NO2 |
-| Quality | Custom data quality runner, Great Expectations schema validation |
+| Quality | Custom Great Expectations-backed data quality runner and schema validation |
 | Observability | Grafana Cloud (`mohamedwillforge.grafana.net`) — Prometheus remote_write to Mimir, hosted dashboards and alert rules |
 | Local observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, cAdvisor (docker-compose) |
 | CI/CD | GitHub Actions (5 workflows), ghcr.io image publishing |

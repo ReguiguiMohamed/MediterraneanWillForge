@@ -102,6 +102,33 @@ def test_required_columns_missing_detected(bronze_df):
     assert "nonexistent_col" in missing[0].check_name
 
 
+def test_required_columns_uses_great_expectations_validator():
+    class FakeExpectationResult:
+        def __init__(self, success):
+            self.success = success
+
+    class FakeValidator:
+        def __init__(self):
+            self.columns = []
+
+        def expect_column_to_exist(self, col):
+            self.columns.append(col)
+            return FakeExpectationResult(success=col != "blocked_by_ge")
+
+    validator = FakeValidator()
+
+    results = check_required_columns(
+        pd.DataFrame({"blocked_by_ge": [1]}),
+        "bronze",
+        "t",
+        ["station_id", "blocked_by_ge"],
+        validator=validator,
+    )
+
+    assert validator.columns == ["station_id", "blocked_by_ge"]
+    assert [r.passed for r in results] == [True, False]
+
+
 # ── check_null_rate ────────────────────────────────────────────────────────────
 
 
