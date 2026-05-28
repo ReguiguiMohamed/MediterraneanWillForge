@@ -1,4 +1,4 @@
-# Mediterranean Ops Fortress — Ingestion Job Image
+# Mediterranean Ops Fortress - Ingestion Job Image
 # Build context: repository root (not docker/ingestion/).
 # docker build -f docker/ingestion/Dockerfile .
 
@@ -14,13 +14,12 @@ WORKDIR /app
 COPY docker/ingestion/requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application source — paths relative to repo root (build context)
-COPY data/ingestion/ ./ingestion/
-COPY data/schemas/   ./schemas/
+# Keep the real package layout so data.storage and data.metrics imports work.
+COPY data/ ./data/
 
 RUN useradd -m -u 1001 medops && chown -R medops:medops /app
 USER medops
 
 # Default: run the Open-Meteo Air Quality ingestor.
-# Override at runtime: python -m ingestion.bronze.openaq_ingestor
-CMD ["python", "-m", "ingestion.bronze.copernicus_ingestor"]
+# Override at runtime: python -m data.ingestion.bronze.openaq_ingestor
+CMD ["python", "-m", "data.ingestion.bronze.copernicus_ingestor"]

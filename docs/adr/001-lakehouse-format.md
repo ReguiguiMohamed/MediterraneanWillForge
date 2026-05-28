@@ -1,31 +1,42 @@
 # ADR-001: Delta Lake as the Lakehouse Table Format
 
-**Status:** Accepted  
+**Status:** Accepted
 **Date:** 2024-04-09
+**Last reviewed:** 2026-05-28
 
 ## Context
 
-The platform requires a table format that supports: ACID transactions, schema evolution, partition pruning, and time travel — all on top of MinIO (S3-compatible) object storage. Two options were evaluated: **Delta Lake** and **Apache Iceberg**.
+The platform requires a table format that supports ACID transactions, schema
+evolution, partition pruning, and time travel on S3-compatible object storage.
+The original local target was MinIO; the active production-style target is now
+Backblaze B2, with MinIO retained for local development and CI. Two options were
+evaluated: **Delta Lake** and **Apache Iceberg**.
 
 ## Decision
 
-We use **Delta Lake** via the `deltalake` Python library (pure Rust implementation, no JVM dependency).
+We use **Delta Lake** via the `deltalake` Python library (pure Rust
+implementation, no JVM dependency).
 
 ## Rationale
 
-| Criterion                | Delta Lake                         | Iceberg                            |
-|--------------------------|------------------------------------|------------------------------------|
-| Python-native (no JVM)   | Yes — `deltalake` Rust bindings    | Requires PyIceberg + Java catalog  |
-| Schema evolution         | `schema_mode="merge"` built-in     | Supported, but more config         |
-| Time travel              | `as_of_version()` built-in         | Supported                          |
-| MinIO compatibility      | S3-compatible, works out of the box| Works, but catalog overhead        |
-| Ecosystem maturity       | Strong (Databricks origin)         | Strong (Netflix/Apple origin)      |
-| Operational complexity   | Low — no catalog server needed     | Higher — Hive/REST catalog needed  |
+| Criterion | Delta Lake | Iceberg |
+|---|---|---|
+| Python-native, no JVM | Yes, `deltalake` Rust bindings | Requires PyIceberg plus a Java-backed catalog in common deployments |
+| Schema evolution | `schema_mode="merge"` built in | Supported, but more catalog/config work |
+| Time travel | Versioned Delta log support | Supported |
+| S3-compatible storage | Works with Backblaze B2 and MinIO | Works, but still needs catalog decisions |
+| Operational complexity | Low, no catalog server required | Higher, commonly needs Hive/REST/catalog infrastructure |
 
-For a local-first, JVM-free stack, Delta Lake with `deltalake` requires zero infrastructure beyond MinIO. Iceberg's catalog requirement would add operational weight with no measurable benefit at this data volume.
+For a local-first, JVM-free stack, Delta Lake with `deltalake` requires no table
+catalog service beyond object storage. Iceberg's catalog requirement would add
+operational weight with no measurable benefit at this data volume.
 
 ## Consequences
 
-- All three medallion layers use Delta Lake format.
-- Schema evolution is handled via `schema_mode="merge"` on write, logged as Prometheus metrics when detected.
-- If data volumes grow beyond local capacity, migration to a managed catalog (Unity Catalog, Polaris) is straightforward — Iceberg support can be added as a second format without changing the pipeline interface.
+- All medallion layers use Delta Lake format.
+- Schema evolution is handled via `schema_mode="merge"` on writes where needed.
+- Writes attempt `create_checkpoint()` after `write_deltalake()` so B2 Class B
+  reads stay bounded when tables are opened later.
+- If data volumes grow beyond this project's portfolio scale, migration to a
+  managed catalog or an additional table format remains possible without
+  changing the high-level pipeline boundaries.

@@ -2,87 +2,83 @@
 
 ## System Overview
 
-Mediterranean Ops Fortress combines reproducible local infrastructure, a Delta
-Lake medallion data pipeline, dbt analytics models, and full pipeline
-observability. The current data domain is real Mediterranean air quality sourced
-from public APIs only.
+Mediterranean Ops Fortress is a real-data air-quality platform for the
+Mediterranean and North Africa. It runs a daily batch pipeline against public
+APIs, stores Delta Lake medallion tables on Backblaze B2, validates the latest
+partitions, builds Gold analytics marts, pushes optional Grafana Cloud metrics,
+and regenerates repo-owned static report artifacts.
 
 ```mermaid
 flowchart TD
-    subgraph sources["Data Sources"]
-        OM["Open-Meteo Air Quality API\n12 Mediterranean cities\nCAMS-backed gridded model"]
-        OA["OpenAQ v3\nStation observations\n10 North African / Mediterranean countries"]
+    subgraph sources["Public data sources"]
+        OM["Open-Meteo Air Quality API\n12 Mediterranean grid points\nCAMS-backed model data"]
+        OA["OpenAQ v3\nStation daily aggregates\n9 target countries"]
+        WAQI["WAQI\nCurrent station readings\n15 city queries"]
     end
 
-    subgraph lake["Delta Lake on Backblaze B2 (MinIO in local dev)"]
-        BR["Bronze\ns3://bronze/openmeteo/air_quality\ns3://bronze/openaq/air_quality"]
-        SI["Silver\ns3://silver/air_quality\ncanonical schema + WHO flags"]
-        GO["Gold\ns3://gold/daily_country_summary\ns3://gold/wildfire_risk_index"]
-        DBT["dbt models\nDuckDB over Silver parquet"]
+    subgraph lake["Delta Lake on Backblaze B2\nMinIO in local dev and CI"]
+        BO["Bronze openmeteo\ns3://bronze/openmeteo/air_quality"]
+        BA["Bronze openaq\ns3://bronze/openaq/air_quality"]
+        BW["Bronze waqi\ns3://bronze/waqi/air_quality"]
+        SI["Silver air_quality\ncanonical schema, WHO flags, AQI, completeness"]
+        GD["Gold daily_country_summary"]
+        GW["Gold wildfire_risk_index"]
+        GA["Gold anomaly_alerts\nIsolation Forest"]
+        DBT["dbt / DuckDB marts\nviews over Silver parquet"]
     end
 
-    subgraph obs["Observability"]
-        PG["Pushgateway\n:9091"]
-        PR["Prometheus\n:9090"]
-        AM["Alertmanager\n:9093"]
-        GF["Grafana\n:3000"]
-        CA["cAdvisor\n:8080"]
+    subgraph reporting["Reporting and observability"]
+        GC["Grafana Cloud Mimir\nPrometheus remote_write"]
+        GFD["Grafana Cloud dashboard and alerts"]
+        PNG["docs/*.png + pipeline_report.html\nstatic portfolio surface"]
+        LOBS["Local Prometheus, Pushgateway,\nAlertmanager, cAdvisor"]
     end
 
-    OM --> BR
-    OA --> BR
-    BR --> SI
-    SI --> GO
+    OM --> BO
+    OA --> BA
+    WAQI --> BW
+    BO & BA & BW --> SI
+    SI --> GD
+    SI --> GW
+    SI --> GA
     SI --> DBT
-    BR & SI & GO -->|"batch metrics push"| PG
-    PG --> PR
-    CA -->|"container metrics"| PR
-    PR --> AM
-    PR --> GF
+    BO & BA & BW & SI & GD & GW & GA --> GC
+    GC --> GFD
+    GD & GW & GA --> PNG
+    BO & BA & BW & SI --> LOBS
 ```
 
 ## Data Flow
 
-```text
-Open-Meteo Air Quality API
-  CAMS-backed gridded PM2.5, PM10, NO2, O3 for 12 cities
-        |
-        v
-Bronze Delta tables on MinIO           partition_date / source partitioned
-        |
-        v
-Silver canonical air_quality table     cleaning, typing, WHO 2021 exceedance
-  flags, AQI category, completeness    flags, AQI category, completeness
-        |
-        +---> dbt models (DuckDB over Silver parquet on MinIO)
-        |
-        v
-Gold Delta marts
-  daily_country_summary                country/source aggregates + WHO pct
-  wildfire_risk_index                  composite O3 + PM2.5 risk score
+The scheduled workflow runs daily at 06:00 UTC. By default it ingests
+yesterday's date; manual dispatch can target a single date or a date range.
 
-OpenAQ v3 API
-  station observations for TN, DZ, MA, LY, EG, TR, GR, ES, IT, LB
-  two-phase fetch: /v3/locations per country → /v3/sensors/{id}/measurements/daily
-  range mode: single API pass covers N dates (backfill-efficient)
-        |
-        `-- same Bronze -> Silver -> Gold path
-```
+| Stage | Implementation | Notes |
+|---|---|---|
+| Bronze Open-Meteo | `data/ingestion/bronze/copernicus_ingestor.py` | Open-Meteo Air Quality data for 12 cities; no API key. The filename is historical; persisted source label is `openmeteo`. |
+| Bronze OpenAQ | `data/ingestion/bronze/openaq_ingestor.py` | OpenAQ v3 locations plus `/v3/sensors/{id}/measurements/daily`; 50-location cap per country; range mode fetches N dates in one sensor call. |
+| Bronze WAQI | `data/ingestion/bronze/waqi_ingestor.py` | WAQI current readings for 15 city queries; token required; useful for LB/MA coverage gaps but not historical backfills. |
+| Silver | `data/ingestion/silver/transformer.py` | Canonicalizes source rows, calculates WHO guideline exceedance flags, AQI category, completeness, and partition metadata. |
+| Gold marts | `data/ingestion/gold/marts.py` | Builds `daily_country_summary` and `wildfire_risk_index`. |
+| Gold anomaly | `data/ingestion/gold/anomaly.py` | Isolation Forest on PM2.5, ozone, and nitrogen dioxide; excludes first-appearance stations without historical baseline. |
+| Quality | `data/quality/run_checks.py` | Great Expectations-backed checks for Bronze and Silver recent partitions; supports GE 0.18 and 1.x APIs. |
+| Static reporting | `data/reporting/static_report.py`, `docs/pipeline_report.ipynb` | Writes PNG charts, `docs/reporting_readiness.csv`, and `docs/pipeline_report.html`. |
 
-Every pipeline stage pushes batch metrics to Pushgateway after completion.
-Prometheus scrapes Pushgateway, cAdvisor (container metrics), MinIO, and itself.
-Grafana visualizes freshness, row counts, quality failures, stage duration, and
-infrastructure health. Alertmanager routes firing alerts into intent-driven groups.
+## Medallion Tables
 
-## Medallion Architecture
+| Layer | Location | Content |
+|---|---|---|
+| Bronze | `s3://{bronze_bucket}/openmeteo/air_quality` | Open-Meteo gridded daily pollutant records, partitioned by `partition_date`. |
+| Bronze | `s3://{bronze_bucket}/openaq/air_quality` | OpenAQ station daily records, partitioned by `partition_date`. |
+| Bronze | `s3://{bronze_bucket}/waqi/air_quality` | WAQI station current readings attributed to the target partition date. |
+| Silver | `s3://{silver_bucket}/air_quality` | Canonical cleaned rows with WHO flags, AQI category, completeness, source, and partition date. |
+| Gold | `s3://{gold_bucket}/daily_country_summary` | Daily country/source pollutant aggregates and WHO exceedance percentages. |
+| Gold | `s3://{gold_bucket}/wildfire_risk_index` | Composite O3 plus PM2.5 risk index per station/day. |
+| Gold | `s3://{gold_bucket}/anomaly_alerts` | Isolation Forest anomaly scores and flags per station/day. |
 
-| Layer | Location | Content | Format |
-|---|---|---|---|
-| Bronze | `s3://bronze/openmeteo/air_quality` | Open-Meteo CAMS-backed gridded records, append-only, partitioned by `partition_date` | Delta Lake |
-| Bronze | `s3://bronze/openaq/air_quality` | OpenAQ station observations, append-only, partitioned by `partition_date` | Delta Lake |
-| Silver | `s3://silver/air_quality` | Canonical cleaned rows with WHO flags, AQI category, completeness, source, and partition date | Delta Lake |
-| Gold | `s3://gold/daily_country_summary` | Daily country/source pollutant aggregates and WHO exceedance percentages | Delta Lake |
-| Gold | `s3://gold/wildfire_risk_index` | Composite O3 plus PM2.5 risk index per station and day | Delta Lake |
+All writes are Delta Lake writes through `deltalake`. Writes that use schema
+evolution use `engine="rust"`, and each write attempts `create_checkpoint()` so
+B2 Class B reads remain bounded when a `DeltaTable()` is opened later.
 
 ## Canonical Silver Schema
 
@@ -95,135 +91,81 @@ who_pm25_exceed, who_pm10_exceed, who_no2_exceed, who_o3_exceed,
 data_completeness, source, silver_ts, partition_date
 ```
 
-Column names intentionally use `pm2_5`, `nitrogen_dioxide`, and `ozone`.
-Downstream code must not introduce aliases such as `pm2p5`, `no2`, or `o3`.
+Source labels are frozen as `openmeteo`, `openaq`, and `waqi`. Pollutant columns
+must remain `pm2_5`, `pm10`, `nitrogen_dioxide`, and `ozone`; do not introduce
+aliases such as `pm2p5`, `no2`, or `o3`.
 
-## Infrastructure Layers
+## Storage and Local Development
 
-### Vagrant
-
-A single Ubuntu 22.04 VM hosts the local stack at `192.168.56.10`. Ports are
-forwarded to the host for MinIO, Prometheus, Pushgateway, Grafana, and
-Alertmanager.
-
-### Terraform
-
-Three modules manage Docker resources on the VM:
-
-| Module | Responsibility |
-|---|---|
-| `networking` | Docker bridge network (`med-ops-net`) |
-| `storage` | MinIO container, named volume, and bucket initialization via `minio/mc` |
-| `compute` | Prometheus, Pushgateway, Grafana, and Alertmanager containers |
-
-The project uses the `kreuzwerker/docker` provider. Provider declarations live
-inside each module to avoid falling back to the nonexistent `hashicorp/docker`
-provider.
-
-### Ansible
-
-Six roles configure the VM in order:
+Production-style runs use Backblaze B2 S3-compatible storage:
 
 ```text
-common -> docker -> minio -> prometheus -> alertmanager -> grafana
+https://s3.eu-central-003.backblazeb2.com
+med-ops-mohamed-bronze
+med-ops-mohamed-silver
+med-ops-mohamed-gold
 ```
 
-All observability containers join the shared `med-ops-net` Docker network so
-Prometheus can reach targets by service name (`alertmanager:9093`,
-`pushgateway:9091`, `minio:9000`). Docker Engine installation uses the
-keyring-based `apt` source (not the deprecated `apt_key` flow). A
-`node_exporter` container is deployed on the VM and scraped at
-`192.168.56.10:9100`.
+Local development and CI use MinIO via `docker/docker-compose.override.yml` or a
+manually started MinIO service in GitHub Actions. `data/storage.py` translates
+the shared `MINIO_*` env vars into delta-rs storage options, including
+`AWS_ENDPOINT_URL`, `AWS_REGION`, and `AWS_ALLOW_HTTP` derived from the endpoint
+scheme.
 
-### Docker Compose
+## Analytics Layer
 
-`docker/docker-compose.yml` provides a local alternative without Vagrant.
-All images are pinned to verified versions.
+The Python Gold tables are the canonical portfolio outputs. dbt adds a DuckDB
+analytics layer over Silver parquet using `read_parquet()` with
+`hive_partitioning=true`; this avoids `delta_scan()` behavior that can hang in
+GitHub Actions.
 
-Services in the default stack (no `--profile` required):
+Current dbt marts:
 
-| Service | Image | Port |
-|---|---|---|
-| `minio` | `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` | 9000, 9001 |
-| `pushgateway` | `prom/pushgateway:v1.8.0` | 9091 |
-| `prometheus` | `prom/prometheus:v2.51.0` | 9090 |
-| `alertmanager` | `prom/alertmanager:v0.27.0` | 9093 |
-| `grafana` | `grafana/grafana-oss:10.4.2` | 3000 |
-| `cadvisor` | `gcr.io/cadvisor/cadvisor:v0.49.1` | 8080 |
-
-Profile-gated pipeline jobs (activated with `--profile jobs` or `make ingest`):
-
-| Service | Purpose |
+| Model | Purpose |
 |---|---|
-| `ingestion` | Bronze ingestors + Silver transformer + Gold mart builder |
-| `quality` | Great Expectations-backed data quality runner |
-
-Startup order is enforced via healthchecks and `depends_on` conditions:
-`pushgateway` healthy before `prometheus` starts; `prometheus` healthy before
-`grafana` starts; `minio` healthy before `ingestion` and `quality` start.
+| `mart_daily_air_quality` | Daily aggregates by country/source/AQI tier. |
+| `mart_city_weekly_trend` | City-level PM2.5 and ozone means with trailing 7-day averages. |
+| `mart_source_coverage` | Station/read coverage and pollutant availability by date/country/source. |
+| `mart_who_exceedance_streak` | Consecutive station-day WHO exceedance streaks. |
 
 ## Observability Model
 
-```text
-Pipeline jobs -> Pushgateway -> Prometheus -> Grafana
-cAdvisor ----------------------^          |
-MinIO (metrics endpoint) ------^          v
-node_exporter (VM) ------------^    Alertmanager
-```
+Grafana Cloud is the live observability target. Pipeline stages build
+stage-specific Prometheus registries and call `data.metrics.push_to_grafana()`.
+The helper is a no-op unless `GRAFANA_REMOTE_WRITE_URL`, `GRAFANA_METRICS_ID`,
+and `GRAFANA_TOKEN` are all set. Failures are logged and non-fatal.
 
-### Pipeline Metrics
+Metric names are intentionally flat to stay inside Grafana Cloud free-tier
+series limits:
 
-| Metric | Labels | Purpose |
-|---|---|---|
-| `pipeline_ingested_rows` | `layer`, `source` | Row counts per pipeline run |
-| `pipeline_last_successful_run_timestamp` | `layer` | Freshness tracking |
-| `pipeline_duration_seconds` | `stage` | Stage latency |
-| `pipeline_quality_check_failures_total` | `check_name`, `layer` | Quality gate failures |
-| `pipeline_schema_drift_events_total` | `table` | Schema evolution events |
+| Metric | Purpose |
+|---|---|
+| `med_ops_bronze_openmeteo_rows`, `med_ops_bronze_openaq_rows`, `med_ops_bronze_waqi_rows` | Bronze row counts per source. |
+| `med_ops_silver_rows` | Silver rows written per run. |
+| `med_ops_gold_mart_rows` | Total rows written across Gold marts. |
+| `med_ops_gold_anomaly_rows`, `med_ops_gold_anomaly_flags` | Anomaly model rows and flags. |
+| `med_ops_*_last_run_ts`, `med_ops_*_duration_seconds` | Freshness and duration by stage. |
+| `pipeline_quality_check_failures_total` | Local Pushgateway quality failure counter. |
 
-### Alert Rules
-
-`infra_alerts.yml` covers: `ContainerDown` (critical), `MinIODown` (critical),
-`DiskUsageCritical` (critical), `HighCPUUsage` (warning), `HighMemoryUsage`
-(warning).
-
-`pipeline_alerts.yml` covers: `BronzeLayerStale`, `SilverLayerStale`,
-`GoldLayerStale`, `QualityChecksStale`, `BronzeRowCountDrop` (all warning),
-`DataQualityCheckFailed` (severity `pipeline`), `BronzeIngestSlow`,
-`SilverTransformSlow` (warning).
-
-### Alertmanager Routing
-
-Alerts are routed into three intent-driven groups:
-
-| Receiver | Matches | group_wait | repeat_interval |
-|---|---|---|---|
-| `infra_critical` | `severity=critical` | 10 s | 1 h |
-| `pipeline_ops` | `severity=pipeline` or `severity=warning` + layer label | 1–2 m | 2–4 h |
-| `infra_ops` | all other warnings | 30 s | 4 h |
-
-Three inhibit rules suppress downstream noise: a `MinIODown` critical event
-suppresses all layer-staleness warnings; a `ContainerDown` event suppresses
-CPU/memory warnings for the same container; critical severity suppresses the
-matching warning-level alert by `alertname`.
-
-Webhook receivers default to `localhost:5001` placeholders. Override via
-`ansible/vars/common.yml` before deploying to a real environment.
+The local observability stack remains useful for development:
+Prometheus, Pushgateway, Alertmanager, and cAdvisor are defined in
+`docker/docker-compose.yml`. Grafana Cloud dashboards and alert rules live under
+`grafana/`.
 
 ## CI/CD
 
-| Workflow | Path Triggers | Responsibility |
+| Workflow | Trigger | Responsibility |
 |---|---|---|
-| `ci-data.yml` | `data/**`, `tests/**`, `docker/**` | Python linting, unit tests, dbt compile, Docker builds, MinIO-backed integration tests, Silver/Gold assertions, dbt run+test |
-| `ci-infra.yml` | `terraform/**`, `ansible/**`, `monitoring/**` | Terraform format+validate+tflint, Ansible lint, promtool rule checks, amtool check-config |
-| `cd-deploy.yml` | `docker/**`, `data/ingestion/**` on `main` | Builds and pushes versioned images to ghcr.io |
+| `ci-data.yml` | Data, tests, and Docker changes | Ruff, Black, unit tests, dbt compile, Docker image build, MinIO integration, Silver/Gold verification, dbt run/test. |
+| `ci-infra.yml` | Monitoring config changes | Prometheus config/rule validation and Alertmanager config validation. |
+| `cd-deploy.yml` | Push to `main` for Docker/ingestion paths | Build and publish GHCR images. |
+| `pipeline-run.yml` | Daily 06:00 UTC and manual dispatch | Runs Bronze -> Silver -> Gold -> Anomaly against real B2. |
+| `update-report.yml` | Successful pipeline run and manual dispatch | Executes the report notebook, renders HTML, and commits updated report artifacts. |
+| `verify-secrets.yml` | Manual dispatch | Probes B2 and Grafana credentials without reading/writing lake data. |
 
-The data pipeline CI uses real upstream APIs. OpenAQ v3 returns no data for most
-station/date combinations (upstream sparsity — pre-aggregated daily values are
-absent for recent dates on the majority of stations). Tests skip cleanly when the
-ingestor returns 0 rows and no Bronze table is created.
+## Historical Infrastructure
 
-`pipeline-run.yml` runs against real Backblaze B2. It supports both single-date
-(daily cron at 06:00 UTC) and date-range backfill modes via `backfill_start` /
-`backfill_end` inputs. Backfills over ~20 dates should be split across days to
-stay within the B2 free-tier Class B transaction cap (2,500/day).
+Earlier versions included Vagrant, Terraform, and Ansible for a self-hosted VM
+observability stack. That path has been retired from the active architecture:
+Backblaze B2 handles object storage, Grafana Cloud handles hosted metrics, and
+Docker Compose handles local development.

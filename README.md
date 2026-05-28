@@ -40,7 +40,9 @@ The pipeline writes:
 
 ## Pipeline Output
 
-Charts generated from live Gold tables on Backblaze B2. See [`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb) for the full analysis.
+Charts generated from live Gold tables on Backblaze B2. See
+[`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb) or the rendered
+[`docs/pipeline_report.html`](docs/pipeline_report.html) for the full analysis.
 This reporting surface is regenerated automatically each day after the scheduled
 pipeline run completes successfully.
 The report also writes `docs/reporting_readiness.csv` and excludes
@@ -100,7 +102,7 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 | Quality | Custom Great Expectations-backed data quality runner and schema validation |
 | Observability | Grafana Cloud (`mohamedwillforge.grafana.net`) — Prometheus remote_write to Mimir, hosted dashboards and alert rules |
 | Local observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, cAdvisor (docker-compose) |
-| CI/CD | GitHub Actions (5 workflows), ghcr.io image publishing |
+| CI/CD | GitHub Actions (6 workflows), ghcr.io image publishing, automated report refresh |
 
 ## Repository Layout
 
@@ -111,6 +113,7 @@ mediterranean-ops-fortress/
 |   |-- ci-infra.yml         # prometheus config and alert rule validation
 |   |-- cd-deploy.yml        # ghcr.io image publishing
 |   |-- pipeline-run.yml     # daily cron + manual run against real B2
+|   |-- update-report.yml    # regenerates notebook, HTML, PNGs after pipeline success
 |   `-- verify-secrets.yml   # lightweight credential probe (B2 + Grafana)
 |-- data/
 |   |-- ingestion/
@@ -134,6 +137,7 @@ mediterranean-ops-fortress/
 |-- docs/
 |   |-- architecture.md
 |   |-- pipeline_report.ipynb   # live analysis notebook (reads from B2 Gold)
+|   |-- pipeline_report.html    # rendered static report
 |   |-- coverage_heatmap.png
 |   |-- who_exceedance.png
 |   |-- wildfire_risk.png
@@ -199,8 +203,13 @@ To run pipeline jobs locally with MinIO as the lakehouse backend:
 
 ```bash
 make up          # starts MinIO + observability stack
-make ingest      # bronze (both sources) -> silver -> gold
+make ingest      # Open-Meteo, OpenAQ, WAQI, Silver, Gold, anomaly
+make quality     # recent-partition quality checks
 ```
+
+WAQI requires `WAQI_API_KEY`; without it the WAQI stage logs a warning and
+skips. The scheduled GitHub pipeline is the canonical production-style path
+against Backblaze B2.
 
 Access the local stack:
 
@@ -218,17 +227,18 @@ the live dashboard is not part of the local stack.
 
 ### Run Against Backblaze B2
 
-Set credentials in `.env` (create an Application Key at backblaze.com):
+Set credentials in `.env` (create an Application Key at backblaze.com) when
+running Python modules directly against B2:
 
 ```bash
 export MINIO_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 export MINIO_ACCESS_KEY=<b2-key-id>
 export MINIO_SECRET_KEY=<b2-application-key>
-make ingest
+python -m data.ingestion.silver.transformer
 ```
 
 Or trigger `pipeline-run.yml` from the GitHub Actions tab (requires `B2_KEY_ID`
-and `B2_APP_KEY` as repository secrets).
+and `B2_APP_KEY` as repository secrets). This is the preferred full B2 run path.
 
 ---
 
@@ -291,6 +301,7 @@ webhook stubs — local dev does not send real alerts.
 | `ci-infra.yml` | Push/PR on `monitoring/**` | promtool validates prometheus.yml and alert rules; amtool validates alertmanager config |
 | `cd-deploy.yml` | Push to `main` on `docker/**`, `data/ingestion/**` | Builds and pushes versioned images to ghcr.io |
 | `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold → Anomaly against real B2; supports single-date and date-range backfill; pushes metrics to Grafana Cloud when `GRAFANA_*` secrets are set |
+| `update-report.yml` | After successful `pipeline-run.yml` + manual (`workflow_dispatch`) | Executes the report notebook, renders HTML, and commits refreshed report artifacts |
 | `verify-secrets.yml` | Manual (`workflow_dispatch`) | Probes B2 and Grafana Cloud credentials without touching data (~30 s) |
 
 Pinned linting versions:

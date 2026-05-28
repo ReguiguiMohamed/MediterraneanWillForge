@@ -1,0 +1,16 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+
+data/dbt/target
+docs/*.png
+docs/*.html
+docs/*.ipynb
+docs/reporting_readiness.csv
+
+checkpoint.md
+next_iterations.md

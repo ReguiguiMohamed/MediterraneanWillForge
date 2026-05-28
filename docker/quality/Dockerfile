@@ -1,4 +1,4 @@
-# Mediterranean Ops Fortress — Data Quality Job Image
+# Mediterranean Ops Fortress - Data Quality Job Image
 # Build context: repository root (not docker/quality/).
 # docker build -f docker/quality/Dockerfile .
 
@@ -20,12 +20,10 @@ RUN pip install --no-cache-dir \
       python-dotenv==1.0.1 \
       loguru==0.7.2
 
-# Paths relative to repo root (build context)
-COPY data/quality/  ./quality/
-COPY data/__init__.py data/storage.py ./data/
-COPY data/schemas/  ./schemas/
+# Keep the real package layout so data.storage imports work.
+COPY data/ ./data/
 
 RUN useradd -m -u 1001 medops && chown -R medops:medops /app
 USER medops
 
-CMD ["python", "-m", "quality.run_checks"]
+CMD ["python", "-m", "data.quality.run_checks"]

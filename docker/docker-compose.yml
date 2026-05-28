@@ -121,7 +121,7 @@ services:
 
   # ── Data pipeline jobs ────────────────────────────────────────────────────────
   # Activated with --profile jobs.
-  # MINIO_ENDPOINT must point to OCI Object Storage (or local MinIO via override).
+  # MINIO_ENDPOINT points to Backblaze B2 by default, or local MinIO via override.
   # Build context is the repo root so both Dockerfiles can access data/ and docker/.
   ingestion:
     build:
@@ -133,7 +133,7 @@ services:
     env_file:
       - ../.env
     environment:
-      MINIO_ENDPOINT:             ${MINIO_ENDPOINT}
+      MINIO_ENDPOINT:             ${MINIO_ENDPOINT:-https://s3.eu-central-003.backblazeb2.com}
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
     networks:
       - fortress
@@ -151,10 +151,11 @@ services:
     env_file:
       - ../.env
     environment:
-      MINIO_ENDPOINT:             ${MINIO_ENDPOINT}
+      MINIO_ENDPOINT:             ${MINIO_ENDPOINT:-https://s3.eu-central-003.backblazeb2.com}
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
-      MINIO_BUCKET_BRONZE:        ${MINIO_BUCKET_BRONZE:-med-ops-fortress-bronze}
-      MINIO_BUCKET_SILVER:        ${MINIO_BUCKET_SILVER:-med-ops-fortress-silver}
+      MINIO_BUCKET_BRONZE:        ${MINIO_BUCKET_BRONZE:-med-ops-mohamed-bronze}
+      MINIO_BUCKET_SILVER:        ${MINIO_BUCKET_SILVER:-med-ops-mohamed-silver}
+      MINIO_BUCKET_GOLD:          ${MINIO_BUCKET_GOLD:-med-ops-mohamed-gold}
       QUALITY_LOOKBACK_DAYS:      "1"
     networks:
       - fortress

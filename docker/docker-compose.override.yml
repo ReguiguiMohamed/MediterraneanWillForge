@@ -1,13 +1,7 @@
-# docker-compose.override.yml — local development only
+# docker-compose.override.yml - local development only
 #
-# Adds a MinIO container so the pipeline jobs can run without OCI credentials.
-# Docker Compose merges this automatically when both files are present.
-#
-# Usage:
-#   docker compose up                    # observability stack only (cloud storage mode)
-#   docker compose -f docker-compose.yml -f docker-compose.override.yml up  # with local MinIO
-#
-# Pipeline jobs pick up the local MinIO endpoint via MINIO_ENDPOINT below.
+# Adds MinIO and creates the bronze/silver/gold buckets so local jobs can run
+# without Backblaze B2 credentials.
 
 volumes:
   minio_data:
@@ -20,8 +14,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER:            ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD:        ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
       MINIO_PROMETHEUS_AUTH_TYPE: public
     ports:
       - "9000:9000"
@@ -31,23 +25,53 @@ services:
     networks:
       - fortress
     healthcheck:
-      test:     ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
-      timeout:  10s
-      retries:  3
+      timeout: 10s
+      retries: 3
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: med-ops-minio-init
+    profiles:
+      - jobs
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc mb --ignore-existing local/bronze &&
+        mc mb --ignore-existing local/silver &&
+        mc mb --ignore-existing local/gold
+    networks:
+      - fortress
+    depends_on:
+      minio:
+        condition: service_healthy
 
   ingestion:
     environment:
       MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_BRONZE: bronze
+      MINIO_BUCKET_SILVER: silver
+      MINIO_BUCKET_GOLD: gold
     depends_on:
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   quality:
     environment:
-      MINIO_ENDPOINT:        http://minio:9000
-      MINIO_BUCKET_BRONZE:   bronze
-      MINIO_BUCKET_SILVER:   silver
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_BRONZE: bronze
+      MINIO_BUCKET_SILVER: silver
+      MINIO_BUCKET_GOLD: gold
     depends_on:
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
