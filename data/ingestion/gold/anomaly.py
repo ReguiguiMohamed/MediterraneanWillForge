@@ -30,6 +30,8 @@ Model details
 Features:  pm2_5, ozone, nitrogen_dioxide (non-null rows only)
 Algorithm: sklearn IsolationForest, contamination=0.05
 Training:  full Silver history on each run (table rebuilt with overwrite)
+Sources:   openmeteo and openaq only. WAQI IAQI values are index values,
+            not concentration measurements, so they are excluded here.
 
 Minimum rows: if Silver has fewer than 10 usable rows the run is skipped
 to avoid fitting a model on noise.
@@ -54,6 +56,20 @@ from data.storage import delta_storage_options
 _FEATURES = ["pm2_5", "ozone", "nitrogen_dioxide"]
 _CONTAMINATION = 0.05  # expect ~5 % of readings to be anomalous
 _MIN_ROWS = 10  # skip model fit if Silver has fewer rows than this
+_MODEL_SOURCES = {"openmeteo", "openaq"}
+
+
+def _feature_frame(silver_df: pd.DataFrame) -> pd.DataFrame:
+    """Return concentration-compatible rows usable by the anomaly model."""
+    source_mask = silver_df["source"].isin(_MODEL_SOURCES)
+    excluded_sources = len(silver_df) - int(source_mask.sum())
+    if excluded_sources:
+        logger.info(
+            f"Excluding {excluded_sources} Silver row(s) from source(s) outside "
+            f"{sorted(_MODEL_SOURCES)}. WAQI values are IAQI index values, not "
+            "pollutant concentrations."
+        )
+    return silver_df[source_mask].dropna(subset=_FEATURES, how="all").copy()
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
@@ -78,8 +94,7 @@ def run() -> None:
         logger.warning("Silver layer is empty — skipping anomaly detection.")
         return
 
-    # Keep only rows with at least one feature non-null
-    feat_df = silver_df.dropna(subset=_FEATURES, how="all").copy()
+    feat_df = _feature_frame(silver_df)
     if len(feat_df) < _MIN_ROWS:
         logger.warning(
             f"Silver has only {len(feat_df)} usable rows (< {_MIN_ROWS}) — "

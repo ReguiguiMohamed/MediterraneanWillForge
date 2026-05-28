@@ -9,6 +9,7 @@ from deltalake import DeltaTable
 from data.storage import delta_storage_options
 
 EXCLUDED_COUNTRIES = {"CL", "FR", "GB", "NL", "LY"}
+ANOMALY_MODEL_SOURCES = {"openmeteo", "openaq"}
 DEFAULT_PUBLIC_DATE_WINDOW = 45
 
 
@@ -19,8 +20,16 @@ def filter_report_countries(df: pd.DataFrame) -> pd.DataFrame:
     return df[~df["country_code"].isin(EXCLUDED_COUNTRIES)].copy()
 
 
+def filter_anomaly_model_sources(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only sources with concentration-compatible anomaly features."""
+    if df.empty or "source" not in df.columns:
+        return df.copy()
+    return df[df["source"].isin(ANOMALY_MODEL_SOURCES)].copy()
+
+
 def anomaly_daily_rates(anomalies: pd.DataFrame) -> pd.DataFrame:
     """Return anomaly flags and rate per partition date."""
+    anomalies = filter_anomaly_model_sources(anomalies)
     if anomalies.empty:
         return pd.DataFrame(
             columns=["partition_date", "anomaly_flags", "rows", "anomaly_rate_pct"]

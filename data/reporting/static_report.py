@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from data.reporting.analytics import (
     anomaly_daily_rates,
+    filter_anomaly_model_sources,
     filter_report_countries,
     latest_reporting_dates,
     read_gold_table,
@@ -53,7 +54,9 @@ def _style() -> None:
 def _load_gold() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     summary = filter_report_countries(read_gold_table("daily_country_summary"))
     risk = filter_report_countries(read_gold_table("wildfire_risk_index"))
-    anomalies = filter_report_countries(read_gold_table("anomaly_alerts"))
+    anomalies = filter_anomaly_model_sources(
+        filter_report_countries(read_gold_table("anomaly_alerts"))
+    )
     return summary, risk, anomalies
 
 

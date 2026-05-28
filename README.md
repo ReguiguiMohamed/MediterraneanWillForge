@@ -36,7 +36,7 @@ The pipeline writes:
 | Silver | `s3://silver/air_quality` | Canonical cleaned rows with WHO flags, AQI category, completeness, source, and partition date |
 | Gold | `s3://gold/daily_country_summary` | Daily country/source pollutant summaries and WHO exceedance percentages |
 | Gold | `s3://gold/wildfire_risk_index` | Composite O3 + PM2.5 station risk index (0–100 score) |
-| Gold | `s3://gold/anomaly_alerts` | Isolation Forest anomaly flags per station per day (PM2.5, O3, NO2 features) |
+| Gold | `s3://gold/anomaly_alerts` | Isolation Forest anomaly flags per station per day (PM2.5, O3, NO2 features; Open-Meteo/OpenAQ only) |
 
 ## Pipeline Output
 
@@ -98,7 +98,7 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 | Local dev storage | MinIO `RELEASE.2025-09-07T16-13-09Z` (via docker-compose override) |
 | Data pipeline | Python 3.11, pandas, pyarrow, deltalake |
 | Transformation | Bronze → Silver → Gold Python jobs |
-| ML | scikit-learn `IsolationForest` — anomaly detection on Silver PM2.5 / O3 / NO2 |
+| ML | scikit-learn `IsolationForest` — anomaly detection on concentration-compatible Silver PM2.5 / O3 / NO2 rows (`openmeteo`, `openaq`) |
 | Quality | Custom Great Expectations-backed data quality runner and schema validation |
 | Observability | Grafana Cloud (`mohamedwillforge.grafana.net`) — Prometheus remote_write to Mimir, hosted dashboards and alert rules |
 | Local observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, cAdvisor (docker-compose) |
@@ -341,6 +341,10 @@ black==26.3.1
   station coverage can shift on the freshest partition. Public report charts use
   anomaly rates rather than raw anomaly counts and exclude coverage-shifted dates
   flagged in `docs/reporting_readiness.csv`; the lake still keeps all real rows.
+- **WAQI unit semantics:** WAQI `iaqi` pollutant fields are individual AQI index
+  values, not raw concentration measurements. WAQI remains in Bronze/Silver and
+  coverage reporting, but concentration-based anomaly detection excludes WAQI
+  until a proper IAQI-to-concentration conversion is implemented.
 - **Local dev alerting:** `monitoring/alertmanager/alertmanager.yml` uses
   `localhost:5001` webhook stubs — local dev does not send real alerts. Grafana
   Cloud contact points handle production alerting.

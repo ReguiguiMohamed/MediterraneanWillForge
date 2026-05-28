@@ -60,7 +60,7 @@ yesterday's date; manual dispatch can target a single date or a date range.
 | Bronze WAQI | `data/ingestion/bronze/waqi_ingestor.py` | WAQI current readings for 15 city queries; token required; useful for LB/MA coverage gaps but not historical backfills. |
 | Silver | `data/ingestion/silver/transformer.py` | Canonicalizes source rows, calculates WHO guideline exceedance flags, AQI category, completeness, and partition metadata. |
 | Gold marts | `data/ingestion/gold/marts.py` | Builds `daily_country_summary` and `wildfire_risk_index`. |
-| Gold anomaly | `data/ingestion/gold/anomaly.py` | Isolation Forest on PM2.5, ozone, and nitrogen dioxide; excludes first-appearance stations without historical baseline. |
+| Gold anomaly | `data/ingestion/gold/anomaly.py` | Isolation Forest on PM2.5, ozone, and nitrogen dioxide; uses `openmeteo`/`openaq` only and excludes first-appearance stations without historical baseline. |
 | Quality | `data/quality/run_checks.py` | Great Expectations-backed checks for Bronze and Silver recent partitions; supports GE 0.18 and 1.x APIs. |
 | Static reporting | `data/reporting/static_report.py`, `docs/pipeline_report.ipynb` | Writes PNG charts, `docs/reporting_readiness.csv`, and `docs/pipeline_report.html`. |
 
@@ -74,7 +74,7 @@ yesterday's date; manual dispatch can target a single date or a date range.
 | Silver | `s3://{silver_bucket}/air_quality` | Canonical cleaned rows with WHO flags, AQI category, completeness, source, and partition date. |
 | Gold | `s3://{gold_bucket}/daily_country_summary` | Daily country/source pollutant aggregates and WHO exceedance percentages. |
 | Gold | `s3://{gold_bucket}/wildfire_risk_index` | Composite O3 plus PM2.5 risk index per station/day. |
-| Gold | `s3://{gold_bucket}/anomaly_alerts` | Isolation Forest anomaly scores and flags per station/day. |
+| Gold | `s3://{gold_bucket}/anomaly_alerts` | Isolation Forest anomaly scores and flags per concentration-compatible station/day. |
 
 All writes are Delta Lake writes through `deltalake`. Writes that use schema
 evolution use `engine="rust"`, and each write attempts `create_checkpoint()` so

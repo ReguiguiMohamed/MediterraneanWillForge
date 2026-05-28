@@ -3,6 +3,7 @@ import pandas as pd
 from data.reporting.analytics import (
     anomaly_daily_rates,
     coverage_by_date,
+    filter_anomaly_model_sources,
     latest_reporting_dates,
     mark_coverage_readiness,
     reporting_dates,
@@ -23,6 +24,35 @@ def test_anomaly_daily_rates_normalizes_by_rows():
     assert rates.loc[0, "anomaly_rate_pct"] == 10.0
     assert rates.loc[1, "anomaly_flags"] == 5
     assert rates.loc[1, "anomaly_rate_pct"] == 5.0
+
+
+def test_anomaly_daily_rates_excludes_waqi_index_values():
+    anomalies = pd.DataFrame(
+        {
+            "partition_date": ["2026-05-01"] * 4,
+            "source": ["openmeteo", "openaq", "waqi", "waqi"],
+            "is_anomaly": [0, 1, 1, 1],
+        }
+    )
+
+    rates = anomaly_daily_rates(anomalies)
+
+    assert rates.loc[0, "anomaly_flags"] == 1
+    assert rates.loc[0, "rows"] == 2
+    assert rates.loc[0, "anomaly_rate_pct"] == 50.0
+
+
+def test_filter_anomaly_model_sources_keeps_only_concentration_sources():
+    anomalies = pd.DataFrame(
+        {
+            "source": ["openmeteo", "openaq", "waqi"],
+            "is_anomaly": [0, 1, 1],
+        }
+    )
+
+    filtered = filter_anomaly_model_sources(anomalies)
+
+    assert filtered["source"].tolist() == ["openmeteo", "openaq"]
 
 
 def test_coverage_readiness_flags_large_latest_day_jump():
