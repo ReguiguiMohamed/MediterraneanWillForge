@@ -71,6 +71,7 @@ def _feature_frame(silver_df: pd.DataFrame) -> pd.DataFrame:
         )
     return silver_df[source_mask].dropna(subset=_FEATURES, how="all").copy()
 
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 
