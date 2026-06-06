@@ -91,9 +91,7 @@ def run() -> None:
         raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
 
     if silver_df.empty:
-        raise RuntimeError(
-            "Silver layer is empty — anomaly output cannot be produced."
-        )
+        raise RuntimeError("Silver layer is empty — anomaly output cannot be produced.")
 
     feat_df = _feature_frame(silver_df)
     if len(feat_df) < _MIN_ROWS:

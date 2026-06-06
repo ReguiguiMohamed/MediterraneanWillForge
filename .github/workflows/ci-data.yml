@@ -45,7 +45,7 @@ jobs:
         run: ruff check data/ tests/
 
       - name: Check formatting with black
-        run: black --check data/ tests/
+        run: black --check --diff data/ tests/
 
       - name: Run unit tests with coverage
         run: |

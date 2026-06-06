@@ -88,9 +88,7 @@ def validate_gold_frame(
         available_dates = set(frame["partition_date"].astype(str))
         missing_dates = sorted(set(target_dates) - available_dates)
         if missing_dates:
-            errors.append(
-                f"{prefix}: missing requested partition(s) {missing_dates}"
-            )
+            errors.append(f"{prefix}: missing requested partition(s) {missing_dates}")
 
     if contract.name == "daily_country_summary":
         errors.extend(_validate_daily_summary(frame, prefix))
@@ -144,7 +142,12 @@ def _validate_wildfire_risk(frame: pd.DataFrame, prefix: str) -> list[str]:
 
 def _validate_anomaly_alerts(frame: pd.DataFrame, prefix: str) -> list[str]:
     errors = []
-    invalid_flags = set(frame["is_anomaly"].dropna().unique()) - {0, 1, False, True}
+    invalid_flags = set(frame["is_anomaly"].dropna().unique()) - {
+        0,
+        1,
+        False,
+        True,
+    }
     if invalid_flags:
         errors.append(f"{prefix}: unexpected anomaly flags {sorted(invalid_flags)}")
 
