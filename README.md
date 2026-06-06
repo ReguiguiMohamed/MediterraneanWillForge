@@ -258,7 +258,9 @@ Integration tests require a live MinIO or B2 endpoint.
 Pipeline jobs push metrics to **Grafana Cloud** (`mohamedwillforge.grafana.net`)
 via Prometheus remote_write after every stage. The `data/metrics.py` helper
 handles protobuf encoding, Snappy compression, and Basic Auth. It is a
-silent no-op when `GRAFANA_*` env vars are absent, so local dev is unaffected.
+silent no-op when `GRAFANA_*` env vars are absent or the daily preflight
+disables a rejected configuration, so pipeline data processing is unaffected
+by an observability credential outage.
 
 Each stage pushes flat, stage-specific Prometheus metrics. Flat names (no shared
 metric name with label dimensions) are required by Grafana Cloud free-tier
@@ -300,7 +302,7 @@ webhook stubs — local dev does not send real alerts.
 | `ci-data.yml` | Push/PR on `data/**`, `tests/**`, `docker/**` | ruff, black, unit tests, Docker builds, MinIO integration, Silver/Gold assertions |
 | `ci-infra.yml` | Push/PR on `monitoring/**` | promtool validates prometheus.yml and alert rules; amtool validates alertmanager config |
 | `cd-deploy.yml` | Push to `main` on `docker/**`, `data/ingestion/**` | Builds and pushes versioned images to ghcr.io |
-| `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold → Anomaly against real B2; supports single-date and date-range backfill; pushes metrics to Grafana Cloud when `GRAFANA_*` secrets are set |
+| `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold → Anomaly against real B2; supports single-date and date-range backfill; pushes metrics when Grafana credentials pass preflight and continues without metrics when they do not |
 | `update-report.yml` | After successful `pipeline-run.yml` + manual (`workflow_dispatch`) | Executes the report notebook, renders HTML, and commits refreshed report artifacts |
 | `verify-secrets.yml` | Manual (`workflow_dispatch`) | Probes B2 and Grafana Cloud credentials without touching data (~30 s) |
 
@@ -337,6 +339,10 @@ black==26.3.1
   beyond the first unique combination per metric name. All metrics use flat
   per-stage names (e.g. `med_ops_silver_rows`) rather than shared names with
   label dimensions to stay within the free-tier limit.
+- **Grafana credential expiry:** Cloud Access Policy tokens can expire or be
+  revoked independently of the Grafana Cloud plan. The daily pipeline warns
+  and continues without remote metrics; use `verify-secrets.yml` after rotating
+  `GRAFANA_TOKEN`, and confirm the token has `metrics:write` for the stack.
 - **Static report freshness:** WAQI is a current-readings source and upstream
   station coverage can shift on the freshest partition. Public report charts use
   anomaly rates rather than raw anomaly counts and exclude coverage-shifted dates

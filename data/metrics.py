@@ -5,8 +5,8 @@ Prometheus remote_write helper for Grafana Cloud Mimir.
 
 Pushes pipeline metrics to Grafana Cloud after each stage.
 Falls back silently to a no-op when the three GRAFANA_* env vars are
-not all present — so local dev and CI without Grafana secrets configured
-are completely unaffected.
+not all present or GRAFANA_PUSH_ENABLED is false, so local dev and CI
+without working Grafana credentials are completely unaffected.
 
 Usage:
     from data.metrics import push_to_grafana
@@ -37,8 +37,13 @@ def push_to_grafana(registry: CollectorRegistry, job: str) -> None:
     """Push a CollectorRegistry to Grafana Cloud via Prometheus remote_write.
 
     Silent no-op when GRAFANA_REMOTE_WRITE_URL / GRAFANA_METRICS_ID /
-    GRAFANA_TOKEN are not all set. Never raises — logs a warning on failure.
+    GRAFANA_TOKEN are not all set or GRAFANA_PUSH_ENABLED is false.
+    Never raises — logs a warning on failure.
     """
+    enabled = os.environ.get("GRAFANA_PUSH_ENABLED", "true").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        return
+
     url = os.environ.get("GRAFANA_REMOTE_WRITE_URL", "").strip()
     uid = os.environ.get("GRAFANA_METRICS_ID", "").strip()
     token = os.environ.get("GRAFANA_TOKEN", "").strip()
