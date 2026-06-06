@@ -113,9 +113,7 @@ def _validate_daily_summary(frame: pd.DataFrame, prefix: str) -> list[str]:
         "who_o3_exceed_pct",
     )
     for column in percentage_columns:
-        invalid = frame[column].notna() & (
-            (frame[column] < 0) | (frame[column] > 100)
-        )
+        invalid = frame[column].notna() & ((frame[column] < 0) | (frame[column] > 100))
         if invalid.any():
             errors.append(
                 f"{prefix}: {int(invalid.sum())} {column} values outside [0, 100]"
