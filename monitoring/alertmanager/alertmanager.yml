@@ -3,9 +3,8 @@
 # This file is used when running docker-compose locally.
 # Webhook URLs below are intentional stubs — local dev does not send real alerts.
 #
-# For the cloud deployment (OCI), Ansible generates the live config from
-# ansible/roles/alertmanager/templates/alertmanager.yml.j2 using Slack webhooks
-# defined in ansible/vars/common.yml (overridden via Ansible Vault).
+# Production-style pipeline alerts are configured in Grafana Cloud. This local
+# file exists only to validate routing behavior and support local development.
 #
 # Routing intent:
 #   critical              → infra_critical   (fast: 10 s wait, 1 h repeat)

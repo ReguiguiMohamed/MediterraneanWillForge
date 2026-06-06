@@ -7,8 +7,8 @@ Reads the most recent partition of each table, evaluates Great Expectations
 expectations, logs results, pushes failure counts to Prometheus Pushgateway,
 and exits non-zero if any hard-fail threshold is breached.
 
-Called by the quality Docker image:
-  python -m quality.run_checks
+Called by the quality Docker image and scheduled pipeline:
+  python -m data.quality.run_checks
 
 Environment variables required:
   MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
@@ -16,6 +16,7 @@ Environment variables required:
   MINIO_BUCKET_BRONZE         (default: bronze)
   MINIO_BUCKET_SILVER         (default: silver)
   QUALITY_LOOKBACK_DAYS       (default: 1  — how many past days to check)
+  QUALITY_PARTITION_DATES     (optional comma/space-separated YYYY-MM-DD dates)
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ except ImportError:  # Great Expectations 0.18 compatibility.
     ProgressBarsConfig = None
 
 VALID_SOURCES = {"openmeteo", "openaq", "waqi"}
+REQUIRED_BRONZE_SOURCES = {"openmeteo"}
 
 # ── Storage config ─────────────────────────────────────────────────────────────
 
@@ -148,6 +150,19 @@ def _gx_success(result: Any) -> bool:
     return bool(success)
 
 
+def parse_partition_dates(raw: str) -> list[str]:
+    """Parse a comma/whitespace-separated list of ISO partition dates."""
+    tokens = raw.replace(",", " ").split()
+    partition_dates = []
+    seen = set()
+    for token in tokens:
+        normalized = date.fromisoformat(token).isoformat()
+        if normalized not in seen:
+            seen.add(normalized)
+            partition_dates.append(normalized)
+    return partition_dates
+
+
 # ── Check result ───────────────────────────────────────────────────────────────
 
 
@@ -159,6 +174,27 @@ class CheckResult:
     passed: bool
     severity: str  # "warn" | "fail"
     detail: str = ""
+
+
+def missing_data_result(
+    layer: str,
+    table: str,
+    required: bool,
+    partition_dates: list[str],
+) -> CheckResult:
+    target = (
+        f"target partition(s): {', '.join(partition_dates)}"
+        if partition_dates
+        else "configured lookback window"
+    )
+    return CheckResult(
+        check_name="data_present",
+        layer=layer,
+        table=table,
+        passed=False,
+        severity="fail" if required else "warn",
+        detail=f"no data found for {target}",
+    )
 
 
 # ── Individual check functions ─────────────────────────────────────────────────
@@ -534,15 +570,20 @@ def load_recent_partition(
     table_path: str,
     storage_options: dict[str, str],
     lookback_days: int = 1,
+    partition_dates: list[str] | None = None,
 ) -> pd.DataFrame:
     """
-    Load the most recent available partition, going back up to `lookback_days`.
+    Load configured partitions or recent partitions within `lookback_days`.
     Returns an empty DataFrame if the table doesn't exist or has no data.
     """
-    cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
     try:
         dt = DeltaTable(table_path, storage_options=storage_options)
-        df = dt.to_pandas(filters=[("partition_date", ">=", cutoff)])
+        if partition_dates:
+            filters = [("partition_date", "in", partition_dates)]
+        else:
+            cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
+            filters = [("partition_date", ">=", cutoff)]
+        df = dt.to_pandas(filters=filters)
         return df
     except Exception as exc:
         logger.warning(f"Could not load {table_path}: {exc}")
@@ -596,26 +637,57 @@ def run() -> int:
     silver_bucket = os.environ.get("MINIO_BUCKET_SILVER", "silver")
     pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
     lookback = int(os.environ.get("QUALITY_LOOKBACK_DAYS", "1"))
+    partition_dates = parse_partition_dates(
+        os.environ.get("QUALITY_PARTITION_DATES", "")
+    )
 
-    logger.info(f"Quality checks starting — lookback={lookback}d")
+    target_description = (
+        f"partitions={partition_dates}" if partition_dates else f"lookback={lookback}d"
+    )
+    logger.info(f"Quality checks starting — {target_description}")
     t_start = time.monotonic()
     all_results: list[CheckResult] = []
 
     # ── Bronze sources ────────────────────────────────────────────────────────
     for source in sorted(VALID_SOURCES):
         path = f"s3://{bronze_bucket}/{source}/air_quality"
-        df = load_recent_partition(path, storage_opts, lookback)
+        df = load_recent_partition(
+            path,
+            storage_opts,
+            lookback,
+            partition_dates=partition_dates,
+        )
         if df.empty:
-            logger.warning(f"[bronze/{source}] No recent data found — skipping checks.")
+            result = missing_data_result(
+                "bronze",
+                f"bronze/{source}/air_quality",
+                required=source in REQUIRED_BRONZE_SOURCES,
+                partition_dates=partition_dates,
+            )
+            all_results.append(result)
+            log = logger.error if result.severity == "fail" else logger.warning
+            log(f"[bronze/{source}] {result.detail}")
         else:
             logger.info(f"[bronze/{source}] Loaded {len(df)} rows.")
             all_results.extend(run_bronze_checks(df, source))
 
     # ── Silver ────────────────────────────────────────────────────────────────
     path = f"s3://{silver_bucket}/air_quality"
-    df = load_recent_partition(path, storage_opts, lookback)
+    df = load_recent_partition(
+        path,
+        storage_opts,
+        lookback,
+        partition_dates=partition_dates,
+    )
     if df.empty:
-        logger.warning("[silver] No recent data found — skipping checks.")
+        result = missing_data_result(
+            "silver",
+            "silver/air_quality",
+            required=True,
+            partition_dates=partition_dates,
+        )
+        all_results.append(result)
+        logger.error(f"[silver] {result.detail}")
     else:
         logger.info(f"[silver] Loaded {len(df)} rows.")
         all_results.extend(run_silver_checks(df))

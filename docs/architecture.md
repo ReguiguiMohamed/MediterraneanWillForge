@@ -114,10 +114,11 @@ scheme.
 
 ## Analytics Layer
 
-The Python Gold tables are the canonical portfolio outputs. dbt adds a DuckDB
-analytics layer over Silver parquet using `read_parquet()` with
+The Python Gold tables are the canonical scheduled portfolio outputs. dbt adds
+a DuckDB analytics layer over Silver parquet using `read_parquet()` with
 `hive_partitioning=true`; this avoids `delta_scan()` behavior that can hang in
-GitHub Actions.
+GitHub Actions. The dbt models are compiled and executed in MinIO-backed CI to
+validate SQL contracts, but they are not materialized by the daily B2 workflow.
 
 Current dbt marts:
 
@@ -159,8 +160,9 @@ Prometheus, Pushgateway, Alertmanager, and cAdvisor are defined in
 | `ci-data.yml` | Data, tests, and Docker changes | Ruff, Black, unit tests, dbt compile, Docker image build, MinIO integration, Silver/Gold verification, dbt run/test. |
 | `ci-infra.yml` | Monitoring config changes | Prometheus config/rule validation and Alertmanager config validation. |
 | `cd-deploy.yml` | Push to `main` for Docker/ingestion paths | Build and publish GHCR images. |
-| `pipeline-run.yml` | Daily 06:00 UTC and manual dispatch | Runs Bronze -> Silver -> Gold -> Anomaly against real B2. |
+| `pipeline-run.yml` | Daily 06:00 UTC and manual dispatch | Runs Bronze -> Silver -> quality gate -> Gold -> anomaly against real B2, then verifies all Gold output contracts. |
 | `update-report.yml` | Successful pipeline run and manual dispatch | Executes the report notebook, renders HTML, and commits updated report artifacts. |
+| `pages.yml` | Report artifact changes and manual dispatch | Publishes the committed report as the reviewer-facing GitHub Pages site. |
 | `verify-secrets.yml` | Manual dispatch | Probes B2 and Grafana credentials without reading/writing lake data. |
 
 ## Historical Infrastructure

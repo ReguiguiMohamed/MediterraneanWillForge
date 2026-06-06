@@ -237,6 +237,14 @@ jobs:
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: python -c "from data.ingestion.silver.transformer import run; run()"
 
+      - name: Quality — Validate requested Bronze and Silver partitions
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+        run: |
+          QUALITY_PARTITION_DATES="$PIPELINE_DATES" \
+            python -m data.quality.run_checks
+
       - name: Gold — Build marts (Silver → Gold)
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
@@ -248,3 +256,11 @@ jobs:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: python -c "from data.ingestion.gold.anomaly import run; run()"
+
+      - name: Verify — Gold output contracts and requested partitions
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+        run: |
+          VERIFY_PARTITION_DATES="$PIPELINE_DATES" \
+            python -m data.quality.verify_outputs

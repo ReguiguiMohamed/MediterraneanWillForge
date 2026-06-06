@@ -173,12 +173,10 @@ def run() -> None:
         silver_dt = DeltaTable(silver_path, storage_options=storage_opts)
         silver_df = silver_dt.to_pandas()
     except Exception as exc:
-        logger.error(f"Cannot read Silver layer: {exc}")
-        return
+        raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
 
     if silver_df.empty:
-        logger.warning("Silver layer is empty — nothing to mart.")
-        return
+        raise RuntimeError("Silver layer is empty — Gold marts cannot be produced.")
 
     logger.info(
         f"Silver snapshot: {len(silver_df)} rows across {silver_df['partition_date'].nunique()} dates."

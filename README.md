@@ -4,6 +4,7 @@
 [![CI — Infrastructure](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/ci-infra.yml/badge.svg)](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/ci-infra.yml)
 [![CD — Publish Images](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/cd-deploy.yml/badge.svg)](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/cd-deploy.yml)
 [![Pipeline Run](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/pipeline-run.yml/badge.svg)](https://github.com/ReguiguiMohamed/mediterranean-ops-fortress/actions/workflows/pipeline-run.yml)
+[![Portfolio Report](https://img.shields.io/badge/report-live-0A66C2)](https://reguiguimohamed.github.io/MediterraneanWillForge/)
 
 Mediterranean Ops Fortress is a hybrid Data Engineering and DevOps portfolio
 project built around real Mediterranean air quality data. It ingests public API
@@ -40,9 +41,11 @@ The pipeline writes:
 
 ## Pipeline Output
 
-Charts generated from live Gold tables on Backblaze B2. See
-[`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb) or the rendered
-[`docs/pipeline_report.html`](docs/pipeline_report.html) for the full analysis.
+Charts generated from live Gold tables on Backblaze B2. Open the
+**[live portfolio report](https://reguiguimohamed.github.io/MediterraneanWillForge/)**
+for the reviewer-facing analysis, or inspect
+[`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb) and
+[`docs/pipeline_report.html`](docs/pipeline_report.html) in the repository.
 This reporting surface is regenerated automatically each day after the scheduled
 pipeline run completes successfully.
 The report also writes `docs/reporting_readiness.csv` and excludes
@@ -97,12 +100,12 @@ Column names are intentionally explicit: use `pm2_5`, `nitrogen_dioxide`, and
 | Storage | Backblaze B2 (S3-compatible, `eu-central-003`), Delta Lake, delta-rs |
 | Local dev storage | MinIO `RELEASE.2025-09-07T16-13-09Z` (via docker-compose override) |
 | Data pipeline | Python 3.11, pandas, pyarrow, deltalake |
-| Transformation | Bronze → Silver → Gold Python jobs |
+| Transformation | Scheduled Bronze → Silver → Gold Python jobs; dbt/DuckDB SQL models validated in MinIO-backed CI |
 | ML | scikit-learn `IsolationForest` — anomaly detection on concentration-compatible Silver PM2.5 / O3 / NO2 rows (`openmeteo`, `openaq`) |
 | Quality | Custom Great Expectations-backed data quality runner and schema validation |
 | Observability | Grafana Cloud (`mohamedwillforge.grafana.net`) — Prometheus remote_write to Mimir, hosted dashboards and alert rules |
 | Local observability | Prometheus `v2.51.0`, Pushgateway, Alertmanager `v0.27.0`, cAdvisor (docker-compose) |
-| CI/CD | GitHub Actions (6 workflows), ghcr.io image publishing, automated report refresh |
+| CI/CD | GitHub Actions (7 workflows), ghcr.io image publishing, automated report refresh and Pages deployment |
 
 ## Repository Layout
 
@@ -114,6 +117,7 @@ mediterranean-ops-fortress/
 |   |-- cd-deploy.yml        # ghcr.io image publishing
 |   |-- pipeline-run.yml     # daily cron + manual run against real B2
 |   |-- update-report.yml    # regenerates notebook, HTML, PNGs after pipeline success
+|   |-- pages.yml            # publishes the report through GitHub Pages
 |   `-- verify-secrets.yml   # lightweight credential probe (B2 + Grafana)
 |-- data/
 |   |-- ingestion/
@@ -154,7 +158,7 @@ mediterranean-ops-fortress/
 |-- tests/
 |   |-- unit/
 |   |-- integration/
-|   `-- ci_verify_silver.py / ci_verify_gold.py
+|   `-- ci_verify_silver.py
 |-- .env.example
 |-- Makefile
 `-- README.md
@@ -302,8 +306,9 @@ webhook stubs — local dev does not send real alerts.
 | `ci-data.yml` | Push/PR on `data/**`, `tests/**`, `docker/**` | ruff, black, unit tests, Docker builds, MinIO integration, Silver/Gold assertions |
 | `ci-infra.yml` | Push/PR on `monitoring/**` | promtool validates prometheus.yml and alert rules; amtool validates alertmanager config |
 | `cd-deploy.yml` | Push to `main` on `docker/**`, `data/ingestion/**` | Builds and pushes versioned images to ghcr.io |
-| `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → Gold → Anomaly against real B2; supports single-date and date-range backfill; pushes metrics when Grafana credentials pass preflight and continues without metrics when they do not |
+| `pipeline-run.yml` | Daily cron (06:00 UTC) + manual (`workflow_dispatch`) | Runs Bronze → Silver → quality gate → Gold → anomaly against real B2, then verifies Gold contracts and requested partitions; supports backfills and treats Grafana as optional |
 | `update-report.yml` | After successful `pipeline-run.yml` + manual (`workflow_dispatch`) | Executes the report notebook, renders HTML, and commits refreshed report artifacts |
+| `pages.yml` | Report artifact changes + manual (`workflow_dispatch`) | Publishes the committed HTML report and supporting assets to GitHub Pages |
 | `verify-secrets.yml` | Manual (`workflow_dispatch`) | Probes B2 and Grafana Cloud credentials without touching data (~30 s) |
 
 Pinned linting versions:

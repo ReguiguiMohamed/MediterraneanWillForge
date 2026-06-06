@@ -187,14 +187,22 @@ jobs:
           PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
         run: python -c "from data.ingestion.gold.marts import run; run()"
 
+      - name: Run Gold anomaly detection
+        env:
+          MINIO_ENDPOINT:              http://localhost:9000
+          MINIO_ACCESS_KEY:            minioadmin
+          MINIO_SECRET_KEY:            minioadmin
+          PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
+        run: python -c "from data.ingestion.gold.anomaly import run; run()"
+
       - name: Verify Gold layer tables
-        # Asserts both Gold Delta tables exist, row counts > 0, required columns
-        # present, and value ranges are valid (risk_index in [0,100], pct in [0,100]).
+        # Verifies every Gold Delta output against the production contracts.
         env:
           MINIO_ENDPOINT:   http://localhost:9000
           MINIO_ACCESS_KEY: minioadmin
           MINIO_SECRET_KEY: minioadmin
-        run: python tests/ci_verify_gold.py
+          MINIO_BUCKET_GOLD: gold
+        run: python -m data.quality.verify_outputs
 
       - name: dbt run + test (Silver → dbt views/tables)
         env:

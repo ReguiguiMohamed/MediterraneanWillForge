@@ -88,20 +88,19 @@ def run() -> None:
     try:
         silver_df = DeltaTable(silver_path, storage_options=storage_opts).to_pandas()
     except Exception as exc:
-        logger.error(f"Cannot read Silver layer: {exc}")
-        return
+        raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
 
     if silver_df.empty:
-        logger.warning("Silver layer is empty — skipping anomaly detection.")
-        return
+        raise RuntimeError(
+            "Silver layer is empty — anomaly output cannot be produced."
+        )
 
     feat_df = _feature_frame(silver_df)
     if len(feat_df) < _MIN_ROWS:
-        logger.warning(
-            f"Silver has only {len(feat_df)} usable rows (< {_MIN_ROWS}) — "
-            "skipping anomaly detection to avoid fitting on noise."
+        raise RuntimeError(
+            f"Silver has only {len(feat_df)} usable concentration rows "
+            f"(< {_MIN_ROWS}); anomaly output cannot be produced."
         )
-        return
 
     # Exclude stations seen on fewer than 2 dates — first-appearance stations
     # have no historical baseline and are systematically flagged as anomalies
@@ -118,11 +117,10 @@ def run() -> None:
     feat_df = feat_df[feat_df["station_id"].isin(established)].copy()
 
     if len(feat_df) < _MIN_ROWS:
-        logger.warning(
-            f"Only {len(feat_df)} established-station rows after filtering — "
-            "skipping anomaly detection."
+        raise RuntimeError(
+            f"Only {len(feat_df)} established-station rows remain after filtering "
+            f"(< {_MIN_ROWS}); anomaly output cannot be produced."
         )
-        return
 
     logger.info(f"Silver snapshot: {len(feat_df)} rows with pollutant data.")
 

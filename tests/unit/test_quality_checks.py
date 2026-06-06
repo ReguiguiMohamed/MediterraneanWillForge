@@ -16,6 +16,8 @@ from data.quality.run_checks import (
     check_row_count,
     check_valid_values,
     check_value_range,
+    missing_data_result,
+    parse_partition_dates,
     run_bronze_checks,
     run_silver_checks,
 )
@@ -155,6 +157,43 @@ def test_gx_context_filters_version_specific_config_kwargs(monkeypatch):
     assert context.kwargs["config_version"] == 3.0
     assert context.kwargs["anonymous_usage_statistics"] == {"enabled": False}
     assert context.kwargs["store_backend_defaults"] is not None
+
+
+def test_parse_partition_dates_accepts_workflow_and_csv_formats():
+    assert parse_partition_dates("2026-06-04 2026-06-05,2026-06-04") == [
+        "2026-06-04",
+        "2026-06-05",
+    ]
+
+
+def test_parse_partition_dates_rejects_invalid_dates():
+    with pytest.raises(ValueError):
+        parse_partition_dates("2026-06-31")
+
+
+def test_missing_required_data_is_a_hard_failure():
+    result = missing_data_result(
+        "silver",
+        "silver/air_quality",
+        required=True,
+        partition_dates=["2026-06-05"],
+    )
+
+    assert not result.passed
+    assert result.severity == "fail"
+    assert "2026-06-05" in result.detail
+
+
+def test_missing_optional_source_is_a_warning():
+    result = missing_data_result(
+        "bronze",
+        "bronze/openaq/air_quality",
+        required=False,
+        partition_dates=["2026-06-05"],
+    )
+
+    assert not result.passed
+    assert result.severity == "warn"
 
 
 # ── check_null_rate ────────────────────────────────────────────────────────────

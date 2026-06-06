@@ -2,10 +2,9 @@ name: CD — Publish Images
 
 # Triggered manually or automatically when Docker/data code changes on main.
 # Builds and pushes versioned images to GitHub Container Registry (ghcr.io).
-# Infrastructure (Terraform/Ansible) targets a local Vagrant VM — no remote
-# state exists, so Terraform is NOT executed in CI. Run it locally:
-#   make tf-apply   →  provisions local Docker resources
-#   make provision  →  runs Ansible against the Vagrant VM
+# The scheduled data pipeline runs source code directly against Backblaze B2;
+# these images provide reproducible local/job artifacts and a published build
+# record rather than a separate VM deployment target.
 
 on:
   push:
