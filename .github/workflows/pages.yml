@@ -8,6 +8,9 @@ on:
       - "docs/reporting_readiness.csv"
       - "docs/*.png"
       - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: ["Update Report Images"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -23,6 +26,7 @@ jobs:
   build:
     name: Build Pages Artifact
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout
