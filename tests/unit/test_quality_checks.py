@@ -222,6 +222,22 @@ def test_null_rate_fails_above_fail_threshold():
     assert r.severity == "fail"
 
 
+def test_null_rate_warns_for_optional_source_above_fail_threshold():
+    df = pd.DataFrame({"pm2_5": [None, None, None, None, 1.0]})  # 80%
+    r = check_null_rate(
+        df,
+        "bronze",
+        "t",
+        "pm2_5",
+        warn_threshold=0.30,
+        fail_threshold=0.70,
+        hard_fail=False,
+    )
+    assert not r.passed
+    assert r.severity == "warn"
+    assert "non-blocking optional source" in r.detail
+
+
 def test_null_rate_missing_column_is_fail():
     r = check_null_rate(pd.DataFrame({"x": [1]}), "bronze", "t", "pm2_5")
     assert not r.passed
@@ -298,6 +314,33 @@ def test_bronze_suite_accepts_waqi_source(bronze_df):
     results = run_bronze_checks(bronze_df, "waqi")
     failures = [r for r in results if not r.passed and r.severity == "fail"]
     assert len(failures) == 0, [r.check_name for r in failures]
+
+
+@pytest.mark.parametrize("source", ["openaq", "waqi"])
+def test_bronze_suite_treats_optional_source_sparsity_as_warning(bronze_df, source):
+    sparse = pd.concat([bronze_df] * 2, ignore_index=True).iloc[:5].copy()
+    sparse["station_id"] = [f"station-{i}" for i in range(len(sparse))]
+    sparse["source"] = source
+    sparse["pm2_5"] = [None, None, None, None, 10.0]
+
+    results = run_bronze_checks(sparse, source)
+    pm25_result = next(r for r in results if r.check_name == "null_rate_pm2_5")
+
+    assert not pm25_result.passed
+    assert pm25_result.severity == "warn"
+
+
+def test_bronze_suite_keeps_openmeteo_pollutant_sparsity_as_failure(bronze_df):
+    sparse = pd.concat([bronze_df] * 2, ignore_index=True).iloc[:5].copy()
+    sparse["station_id"] = [f"station-{i}" for i in range(len(sparse))]
+    sparse["source"] = "openmeteo"
+    sparse["pm2_5"] = [None, None, None, None, 10.0]
+
+    results = run_bronze_checks(sparse, "openmeteo")
+    pm25_result = next(r for r in results if r.check_name == "null_rate_pm2_5")
+
+    assert not pm25_result.passed
+    assert pm25_result.severity == "fail"
 
 
 def test_silver_suite_all_pass(silver_df):

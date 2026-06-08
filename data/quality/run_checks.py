@@ -255,6 +255,7 @@ def check_null_rate(
     col: str,
     warn_threshold: float = 0.30,
     fail_threshold: float = 0.70,
+    hard_fail: bool = True,
     validator: Any | None = None,
 ) -> CheckResult:
     if col not in df.columns:
@@ -274,13 +275,15 @@ def check_null_rate(
     )
     null_rate = df[col].isna().mean()
     if null_rate >= fail_threshold:
+        severity = "fail" if hard_fail else "warn"
+        policy = "" if hard_fail else "; non-blocking optional source"
         return CheckResult(
             check_name=f"null_rate_{col}",
             layer=layer,
             table=table,
             passed=False,
-            severity="fail",
-            detail=f"{null_rate:.1%} nulls (fail threshold {fail_threshold:.0%})",
+            severity=severity,
+            detail=f"{null_rate:.1%} nulls (threshold {fail_threshold:.0%}{policy})",
         )
     if null_rate >= warn_threshold:
         return CheckResult(
@@ -455,6 +458,8 @@ def run_bronze_checks(
         )
     )
     for col in ("pm2_5", "pm10", "nitrogen_dioxide", "ozone"):
+        # Optional APIs may return only the pollutants available at each station.
+        # Their schemas remain strict, but expected coverage gaps stay non-blocking.
         results.append(
             check_null_rate(
                 df,
@@ -463,6 +468,7 @@ def run_bronze_checks(
                 col,
                 warn_threshold=0.40,
                 fail_threshold=0.80,
+                hard_fail=source in REQUIRED_BRONZE_SOURCES,
                 validator=validator,
             )
         )
