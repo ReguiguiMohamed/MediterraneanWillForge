@@ -45,24 +45,24 @@ def _source_frame(source: str, target_date: date) -> pd.DataFrame:
     country_codes = ["TN", "DZ", "MA", "EG", "TR", "GR"]
 
     for index in range(station_count):
-        rows.append(
-            {
-                "station_id": f"{source}-station-{index}",
-                "station_name": f"{source.title()} Station {index}",
-                "city": None if source == "openmeteo" else f"City {index}",
-                "country_code": country_codes[index],
-                "latitude": 30.0 + index,
-                "longitude": 5.0 + index,
-                "date": target_date.isoformat(),
-                "pm2_5": 10.0 + index + target_date.day,
-                "pm10": 20.0 + index + target_date.day,
-                "nitrogen_dioxide": 5.0 + index,
-                "ozone": 40.0 + index + target_date.day,
-                "source": source,
-                "ingestion_ts": pd.Timestamp.now(tz=timezone.utc).isoformat(),
-                "partition_date": target_date.isoformat(),
-            }
-        )
+        row = {
+            "station_id": f"{source}-station-{index}",
+            "station_name": f"{source.title()} Station {index}",
+            "country_code": country_codes[index],
+            "latitude": 30.0 + index,
+            "longitude": 5.0 + index,
+            "date": target_date.isoformat(),
+            "pm2_5": 10.0 + index + target_date.day,
+            "pm10": 20.0 + index + target_date.day,
+            "nitrogen_dioxide": 5.0 + index,
+            "ozone": 40.0 + index + target_date.day,
+            "source": source,
+            "ingestion_ts": pd.Timestamp.now(tz=timezone.utc).isoformat(),
+            "partition_date": target_date.isoformat(),
+        }
+        if source != "openmeteo":
+            row["city"] = f"City {index}"
+        rows.append(row)
 
     return pd.DataFrame(rows)
 
