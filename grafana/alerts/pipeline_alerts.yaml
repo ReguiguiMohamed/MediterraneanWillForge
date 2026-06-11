@@ -1,5 +1,4 @@
-# Grafana Cloud — Managed Alert Rules
-# Import via: mohamedwillforge.grafana.net → Alerting → Alert rules → Import
+# Grafana Cloud managed alert rule reference.
 #
 # Three rules covering the most critical pipeline failure modes:
 #   1. Pipeline stale  — no successful run in >25 hours
@@ -23,7 +22,7 @@ groups:
             relativeTimeRange: { from: 90000, to: 0 }
             datasourceUid: "${DS_PROMETHEUS}"
             model:
-              expr: time() - med_ops_bronze_last_run_ts
+              expr: time() - last_over_time(med_ops_bronze_openmeteo_last_run_ts[25h])
               refId: A
               instant: true
           - refId: C

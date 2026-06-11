@@ -12,8 +12,7 @@ Two analytics-ready marts are produced on each run:
   2. wildfire_risk_index
      Composite risk score (0–100) per station per day.
      Formula: 0.6 × normalised O3  +  0.4 × normalised PM2.5.
-     Intended to demonstrate multi-metric aggregation; not a production
-     fire-danger forecast.
+     This is an air-quality indicator, not a fire-danger forecast.
 
 Gold tables are written with mode=overwrite — they are always rebuilt
 from the full Silver layer so consumers always get a consistent snapshot.

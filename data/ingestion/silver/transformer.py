@@ -3,7 +3,7 @@ data/ingestion/silver/transformer.py
 ─────────────────────────────────────
 Bronze → Silver transformation layer.
 
-Reads raw partitions from both Bronze sources (openmeteo + openaq),
+Reads raw partitions from all Bronze sources (openmeteo, openaq, and waqi),
 applies cleaning, type enforcement, WHO 2021 threshold flagging, AQI
 categorisation, and data-completeness scoring, then writes the unified
 canonical Silver table partitioned by (partition_date, source).

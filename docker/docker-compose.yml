@@ -3,13 +3,9 @@ name: med-ops-fortress
 networks:
   fortress:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
 
 volumes:
   prometheus_data:
-  grafana_data:
 
 services:
 
@@ -74,32 +70,6 @@ services:
       timeout:  10s
       retries:  3
 
-  grafana:
-    image: grafana/grafana-oss:10.4.2
-    container_name: med-ops-grafana
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_USER:     admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-fortress}
-      GF_USERS_ALLOW_SIGN_UP:     "false"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/pipeline_health.json
-    ports:
-      - "3000:3000"
-    volumes:
-      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    networks:
-      - fortress
-    depends_on:
-      prometheus:
-        condition: service_healthy
-    healthcheck:
-      test:     ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
-      interval: 30s
-      timeout:  10s
-      retries:  3
-
   # cAdvisor exposes per-container resource metrics scraped by Prometheus at
   # job_name=cadvisor (target: cadvisor:8080).
   cadvisor:
@@ -121,7 +91,7 @@ services:
 
   # ── Data pipeline jobs ────────────────────────────────────────────────────────
   # Activated with --profile jobs.
-  # MINIO_ENDPOINT points to Backblaze B2 by default, or local MinIO via override.
+  # Hosted B2 runs use GitHub Actions. Compose defaults stay local.
   # Build context is the repo root so both Dockerfiles can access data/ and docker/.
   ingestion:
     build:
@@ -131,9 +101,10 @@ services:
     profiles:
       - jobs
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
-      MINIO_ENDPOINT:             ${MINIO_ENDPOINT:-https://s3.eu-central-003.backblazeb2.com}
+      MINIO_ENDPOINT:             ${MINIO_ENDPOINT:-http://minio:9000}
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
     networks:
       - fortress
@@ -149,13 +120,14 @@ services:
     profiles:
       - jobs
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
-      MINIO_ENDPOINT:             ${MINIO_ENDPOINT:-https://s3.eu-central-003.backblazeb2.com}
+      MINIO_ENDPOINT:             ${MINIO_ENDPOINT:-http://minio:9000}
       PROMETHEUS_PUSHGATEWAY_URL: http://pushgateway:9091
-      MINIO_BUCKET_BRONZE:        ${MINIO_BUCKET_BRONZE:-med-ops-mohamed-bronze}
-      MINIO_BUCKET_SILVER:        ${MINIO_BUCKET_SILVER:-med-ops-mohamed-silver}
-      MINIO_BUCKET_GOLD:          ${MINIO_BUCKET_GOLD:-med-ops-mohamed-gold}
+      MINIO_BUCKET_BRONZE:        ${MINIO_BUCKET_BRONZE:-bronze}
+      MINIO_BUCKET_SILVER:        ${MINIO_BUCKET_SILVER:-silver}
+      MINIO_BUCKET_GOLD:          ${MINIO_BUCKET_GOLD:-gold}
       QUALITY_LOOKBACK_DAYS:      "1"
     networks:
       - fortress

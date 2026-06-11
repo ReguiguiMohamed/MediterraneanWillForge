@@ -1,94 +1,61 @@
-# ── Claude Code internals ──────────────────────────────────────────────────────
+# Local tools and environments
 .claude/
+.venv/
+.dbt-venv/
+venv/
+.env
+.vscode/
+.idea/
 
-# ── Python ─────────────────────────────────────────────────────────────────────
+# Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg
 *.egg-info/
-dist/
 build/
-eggs/
-parts/
-var/
-sdist/
-develop-eggs/
-.installed.cfg
-lib/
-lib64/
-*.so
-.venv/
-venv/
-ENV/
-env/
-.env
-!.env.example
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+coverage*.json
 
-# ── Jupyter ────────────────────────────────────────────────────────────────────
+# Jupyter
 .ipynb_checkpoints/
 *.ipynb
 !docs/pipeline_report.ipynb
 
-# ── dbt ────────────────────────────────────────────────────────────────────────
+# dbt and DuckDB
+data/dbt/.user.yml
 data/dbt/target/
 data/dbt/dbt_packages/
 data/dbt/logs/
-# profiles.yml uses only env_var() — safe to commit; no raw secrets
+*.duckdb
+*.duckdb.wal
 
-# ── Great Expectations ─────────────────────────────────────────────────────────
-data/quality/expectations/.ge_store_backend_id
-data/quality/uncommitted/
-
-# ── Terraform ──────────────────────────────────────────────────────────────────
-**/.terraform/
-*.tfstate
-*.tfstate.backup
-*.tfstate.lock.info
-*.tfplan
-.terraform.lock.hcl
-terraform/environments/*/terraform.tfvars
-!terraform/environments/local/terraform.tfvars
-!terraform/environments/local/terraform.tfvars.example
-
-# ── Vagrant ────────────────────────────────────────────────────────────────────
-.vagrant/
-
-# ── Docker ─────────────────────────────────────────────────────────────────────
-docker/data/
-docker/logs/
-
-# ── Data / Lake artifacts ──────────────────────────────────────────────────────
+# Local data and service state
 data/lake/
 data/raw/
+docker/data/
+docker/logs/
+monitoring/alertmanager/data/
 *.parquet
 *.delta
 *.avro
-
-# ── Monitoring credentials ─────────────────────────────────────────────────────
-monitoring/grafana/grafana.db
-monitoring/alertmanager/data/
-
-# ── OS & editors ───────────────────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-.idea/
-.vscode/
-*.iml
-
-# ── Logs ───────────────────────────────────────────────────────────────────────
 *.log
-logs/
 
-# ── Secrets ────────────────────────────────────────────────────────────────────
+# Credentials
 *.pem
 *.key
 secrets/
 credentials/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local planning notes
 CHECKPOINT.md
 checkpoint.md
 next_iterations.md

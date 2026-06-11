@@ -1,17 +1,22 @@
-"""
-Integration tests — requires a live MinIO instance.
-Set MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY in environment.
-Skipped automatically when MinIO is unreachable.
-"""
+"""MinIO-backed integration tests with no public API calls."""
+
+from __future__ import annotations
 
 import os
+from datetime import date, timezone
+
+import pandas as pd
 import pytest
 import requests
-from datetime import date
+from deltalake import DeltaTable
 
+from data.ingestion.bronze.copernicus_ingestor import CopernicusIngestor
+from data.ingestion.bronze.openaq_ingestor import OpenAQIngestor
+from data.ingestion.bronze.waqi_ingestor import WAQIIngestor
 from data.storage import delta_storage_options
 
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
+TEST_DATES = (date(2024, 1, 15), date(2024, 1, 16))
 
 _STORAGE_OPTS = delta_storage_options(
     endpoint=MINIO_ENDPOINT,
@@ -22,121 +27,112 @@ _STORAGE_OPTS = delta_storage_options(
 
 def minio_available() -> bool:
     try:
-        resp = requests.get(f"{MINIO_ENDPOINT}/minio/health/live", timeout=3)
-        return resp.status_code == 200
-    except Exception:
+        response = requests.get(f"{MINIO_ENDPOINT}/minio/health/live", timeout=3)
+        return response.status_code == 200
+    except requests.RequestException:
         return False
 
 
 pytestmark = pytest.mark.skipif(
     not minio_available(),
-    reason="MinIO not reachable — skipping integration tests",
+    reason="MinIO not reachable; skipping integration tests",
 )
 
 
-# ── Open-Meteo (Copernicus) ingestor ─────────────────────────────────────────
+def _source_frame(source: str, target_date: date) -> pd.DataFrame:
+    rows = []
+    station_count = 6 if source == "openmeteo" else 2
+    country_codes = ["TN", "DZ", "MA", "EG", "TR", "GR"]
 
-
-class TestCopernicusIngestor:
-    """End-to-end Bronze write tests for the Open-Meteo ingestor."""
-
-    _TABLE = "s3://bronze/openmeteo/air_quality"
-    _DATE = date(2024, 1, 15)
-
-    def test_writes_delta_table(self):
-        from data.ingestion.bronze.copernicus_ingestor import run
-
-        run(target_date=self._DATE)
-
-        from deltalake import DeltaTable
-
-        dt = DeltaTable(self._TABLE, storage_options=_STORAGE_OPTS)
-        df = dt.to_pandas(filters=[("partition_date", "=", self._DATE.isoformat())])
-        assert not df.empty, "Bronze partition must not be empty after ingest"
-        assert "station_id" in df.columns
-        assert "pm2_5" in df.columns
-
-    def test_idempotent(self):
-        from data.ingestion.bronze.copernicus_ingestor import run
-        from deltalake import DeltaTable
-
-        run_date = date(2024, 1, 16)
-        run(target_date=run_date)
-        dt = DeltaTable(self._TABLE, storage_options=_STORAGE_OPTS)
-        first = len(
-            dt.to_pandas(filters=[("partition_date", "=", run_date.isoformat())])
+    for index in range(station_count):
+        rows.append(
+            {
+                "station_id": f"{source}-station-{index}",
+                "station_name": f"{source.title()} Station {index}",
+                "city": None if source == "openmeteo" else f"City {index}",
+                "country_code": country_codes[index],
+                "latitude": 30.0 + index,
+                "longitude": 5.0 + index,
+                "date": target_date.isoformat(),
+                "pm2_5": 10.0 + index + target_date.day,
+                "pm10": 20.0 + index + target_date.day,
+                "nitrogen_dioxide": 5.0 + index,
+                "ozone": 40.0 + index + target_date.day,
+                "source": source,
+                "ingestion_ts": pd.Timestamp.now(tz=timezone.utc).isoformat(),
+                "partition_date": target_date.isoformat(),
+            }
         )
 
-        run(target_date=run_date)  # second run must be skipped
-        dt2 = DeltaTable(self._TABLE, storage_options=_STORAGE_OPTS)
-        second = len(
-            dt2.to_pandas(filters=[("partition_date", "=", run_date.isoformat())])
+    return pd.DataFrame(rows)
+
+
+def _seed_bronze(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        CopernicusIngestor,
+        "fetch",
+        lambda self, target_date: _source_frame("openmeteo", target_date),
+    )
+    monkeypatch.setattr(
+        OpenAQIngestor,
+        "fetch",
+        lambda self, target_date: _source_frame("openaq", target_date),
+    )
+    monkeypatch.setattr(
+        WAQIIngestor,
+        "fetch",
+        lambda self, target_date: _source_frame("waqi", target_date),
+    )
+
+    from data.ingestion.bronze.copernicus_ingestor import run as run_openmeteo
+    from data.ingestion.bronze.openaq_ingestor import run as run_openaq
+    from data.ingestion.bronze.waqi_ingestor import run as run_waqi
+
+    for target_date in TEST_DATES:
+        run_openmeteo(target_date)
+        run_openaq(target_date)
+        run_waqi(target_date)
+
+
+@pytest.mark.parametrize("source", ["openmeteo", "openaq", "waqi"])
+def test_bronze_sources_write_partitioned_delta_tables(monkeypatch, source):
+    _seed_bronze(monkeypatch)
+
+    table = DeltaTable(
+        f"s3://bronze/{source}/air_quality",
+        storage_options=_STORAGE_OPTS,
+    )
+    frame = table.to_pandas()
+
+    assert set(frame["partition_date"].astype(str)) == {
+        target_date.isoformat() for target_date in TEST_DATES
+    }
+    assert set(frame["source"]) == {source}
+    assert {
+        "station_id",
+        "pm2_5",
+        "pm10",
+        "nitrogen_dioxide",
+        "ozone",
+    }.issubset(frame.columns)
+
+
+def test_bronze_writes_are_idempotent(monkeypatch):
+    _seed_bronze(monkeypatch)
+
+    before = {}
+    for source in ("openmeteo", "openaq", "waqi"):
+        table = DeltaTable(
+            f"s3://bronze/{source}/air_quality",
+            storage_options=_STORAGE_OPTS,
         )
+        before[source] = len(table.to_pandas())
 
-        assert first == second, "Idempotent ingest must not duplicate rows"
+    _seed_bronze(monkeypatch)
 
-
-# ── OpenAQ ingestor ───────────────────────────────────────────────────────────
-
-
-class TestOpenAQIngestor:
-    """End-to-end Bronze write tests for the OpenAQ ingestor.
-
-    OpenAQ v3 may return no measurements for a given historical date when
-    station coverage is absent. When fetch() returns 0 rows the ingestor
-    correctly skips the Delta write; tests detect this and skip gracefully
-    rather than crashing on a missing table.
-    """
-
-    _TABLE = "s3://bronze/openaq/air_quality"
-    _DATE = date(2024, 1, 15)
-
-    def test_writes_delta_table(self):
-        from data.ingestion.bronze.openaq_ingestor import run
-
-        run(target_date=self._DATE)
-
-        from deltalake import DeltaTable
-
-        try:
-            dt = DeltaTable(self._TABLE, storage_options=_STORAGE_OPTS)
-        except Exception as exc:
-            if "no log files" in str(exc) or "TableNotFoundError" in type(exc).__name__:
-                pytest.skip(
-                    f"OpenAQ returned 0 rows for {self._DATE} (upstream 410) — "
-                    "ingestor correctly skipped write; no table to assert on"
-                )
-            raise
-        df = dt.to_pandas(filters=[("partition_date", "=", self._DATE.isoformat())])
-        assert not df.empty, "OpenAQ Bronze partition must not be empty after ingest"
-        assert "station_id" in df.columns
-        assert "country_code" in df.columns
-
-    def test_idempotent(self):
-        from data.ingestion.bronze.openaq_ingestor import run
-        from deltalake import DeltaTable
-
-        run_date = date(2024, 1, 16)
-        run(target_date=run_date)
-
-        try:
-            dt = DeltaTable(self._TABLE, storage_options=_STORAGE_OPTS)
-        except Exception as exc:
-            if "no log files" in str(exc) or "TableNotFoundError" in type(exc).__name__:
-                # 0 rows written — verify second run also completes without error
-                run(target_date=run_date)
-                pytest.skip(
-                    f"OpenAQ returned 0 rows for {run_date} (upstream 410) — "
-                    "idempotency confirmed: both runs completed without error"
-                )
-            raise
-
-        first = len(
-            dt.to_pandas(filters=[("partition_date", "=", run_date.isoformat())])
+    for source, expected_rows in before.items():
+        table = DeltaTable(
+            f"s3://bronze/{source}/air_quality",
+            storage_options=_STORAGE_OPTS,
         )
-        run(target_date=run_date)
-        dt2 = DeltaTable(self._TABLE, storage_options=_STORAGE_OPTS)
-        second = len(
-            dt2.to_pandas(filters=[("partition_date", "=", run_date.isoformat())])
-        )
-        assert first == second, "Idempotent ingest must not duplicate rows"
+        assert len(table.to_pandas()) == expected_rows

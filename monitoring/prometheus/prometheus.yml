@@ -1,13 +1,12 @@
-# Mediterranean Ops Fortress — Prometheus Configuration
-# Every service is scraped. Every anomaly is caught. No blind spots.
+# Local Prometheus configuration for MediterraneanWillForge.
 
 global:
-  scrape_interval:     15s
+  scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     environment: local
-    region:      TN-MED
-    project:     med-ops-fortress
+    region: MED
+    project: mediterranean-will-forge
 
 alerting:
   alertmanagers:
@@ -20,15 +19,12 @@ rule_files:
   - /etc/prometheus/rules/pipeline_alerts.yml
 
 scrape_configs:
-
-  # ── Self-monitoring ──────────────────────────────────────────────────────────
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
         labels:
           service: prometheus
 
-  # ── Pushgateway (batch job metrics) ─────────────────────────────────────────
   - job_name: pushgateway
     honor_labels: true
     static_configs:
@@ -36,7 +32,6 @@ scrape_configs:
         labels:
           service: pushgateway
 
-  # ── MinIO cluster metrics ────────────────────────────────────────────────────
   - job_name: minio
     metrics_path: /minio/v2/metrics/cluster
     scheme: http
@@ -45,10 +40,8 @@ scrape_configs:
         labels:
           service: minio
 
-  # ── cAdvisor (container resource usage) ─────────────────────────────────────
   - job_name: cadvisor
     static_configs:
       - targets: ["cadvisor:8080"]
         labels:
           service: cadvisor
-

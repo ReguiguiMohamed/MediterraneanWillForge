@@ -1,4 +1,4 @@
-"""Validate production Gold Delta tables against their output contracts."""
+"""Validate retained Gold Delta tables against their output contracts."""
 
 from __future__ import annotations
 

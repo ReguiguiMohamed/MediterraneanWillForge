@@ -12,8 +12,8 @@ sources:
     tables:
       - name: air_quality
         description: >
-          Unified Silver Delta table for the openmeteo and openaq real data
-          sources. Each row represents one station or grid point for one
+          Unified Silver Delta table for the openmeteo, openaq, and waqi real
+          data sources. Each row represents one station or grid point for one
           observation date and source.
         meta:
           delta_table_path: "s3://silver/air_quality"
@@ -55,7 +55,7 @@ sources:
           - name: data_completeness
             description: "Fraction of canonical pollutant columns that are non-null."
           - name: source
-            description: "Canonical data source identifier: openmeteo or openaq."
+            description: "Canonical data source identifier: openmeteo, openaq, or waqi."
           - name: silver_ts
             description: "UTC timestamp when the row was written to Silver."
           - name: partition_date

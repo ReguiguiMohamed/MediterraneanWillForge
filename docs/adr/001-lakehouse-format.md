@@ -8,7 +8,7 @@
 
 The platform requires a table format that supports ACID transactions, schema
 evolution, partition pruning, and time travel on S3-compatible object storage.
-The original local target was MinIO; the active production-style target is now
+The original local target was MinIO; the hosted automation target is now
 Backblaze B2, with MinIO retained for local development and CI. Two options were
 evaluated: **Delta Lake** and **Apache Iceberg**.
 

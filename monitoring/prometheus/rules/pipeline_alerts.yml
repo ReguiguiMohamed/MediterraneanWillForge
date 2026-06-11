@@ -2,75 +2,68 @@ groups:
   - name: data_pipeline
     interval: 60s
     rules:
-
-      # ── Data freshness ──────────────────────────────────────────────────────
-      - alert: BronzeLayerStale
-        expr: >
-          (time() - pipeline_last_successful_run_timestamp{layer="bronze"}) > 90000
+      - alert: OpenMeteoRunStale
+        expr: time() - med_ops_bronze_openmeteo_last_run_ts > 90000
         for: 5m
         labels:
           severity: warning
           layer: bronze
         annotations:
-          summary: "Bronze layer has not been updated in >25 hours"
-          description: >
-            Last successful bronze ingestion was {{ $value | humanizeDuration }} ago.
-            Expected cadence: daily. Check ingestion container logs.
+          summary: "Open-Meteo ingestion has not completed in over 25 hours"
+          description: "Last completion was {{ $value | humanizeDuration }} ago."
 
-      - alert: SilverLayerStale
-        expr: >
-          (time() - pipeline_last_successful_run_timestamp{layer="silver"}) > 93600
+      - alert: SilverRunStale
+        expr: time() - med_ops_silver_last_run_ts > 93600
         for: 5m
         labels:
           severity: warning
           layer: silver
         annotations:
-          summary: "Silver transformation has not run in >26 hours"
-          description: >
-            Last successful silver run was {{ $value | humanizeDuration }} ago.
-            Silver runs after bronze — verify bronze completed successfully.
+          summary: "Silver transformation has not completed in over 26 hours"
+          description: "Last completion was {{ $value | humanizeDuration }} ago."
 
-      - alert: GoldLayerStale
-        expr: >
-          (time() - pipeline_last_successful_run_timestamp{layer="gold"}) > 97200
+      - alert: GoldRunStale
+        expr: time() - med_ops_gold_mart_last_run_ts > 97200
         for: 5m
         labels:
           severity: warning
           layer: gold
         annotations:
-          summary: "Gold marts have not been rebuilt in >27 hours"
-          description: >
-            Last gold mart build was {{ $value | humanizeDuration }} ago.
-            Gold depends on silver — check the full pipeline execution order.
+          summary: "Gold marts have not completed in over 27 hours"
+          description: "Last completion was {{ $value | humanizeDuration }} ago."
 
       - alert: QualityChecksStale
-        expr: >
-          (time() - pipeline_last_quality_run_timestamp) > 93600
+        expr: time() - pipeline_last_quality_run_timestamp > 93600
         for: 5m
         labels:
           severity: warning
+          layer: quality
         annotations:
-          summary: "Quality checks have not run in >26 hours"
-          description: >
-            Last quality check run was {{ $value | humanizeDuration }} ago for
-            layer {{ $labels.layer }}. Quality container may have exited early.
+          summary: "Quality checks have not completed in over 26 hours"
+          description: "Last completion was {{ $value | humanizeDuration }} ago."
 
-      # ── Row count anomalies ─────────────────────────────────────────────────
-      - alert: BronzeRowCountDrop
-        expr: >
-          pipeline_ingested_rows{layer="bronze"}
-          < pipeline_ingested_rows{layer="bronze"} offset 1d * 0.5
+      - alert: OpenMeteoRowCountDrop
+        expr: |
+          med_ops_bronze_openmeteo_rows
+          < med_ops_bronze_openmeteo_rows offset 1d * 0.5
         for: 10m
         labels:
           severity: warning
           layer: bronze
         annotations:
-          summary: "Bronze row count dropped >50% vs yesterday (source: {{ $labels.source }})"
-          description: >
-            Ingested {{ $value }} rows for source {{ $labels.source }} today vs
-            expected baseline. Possible upstream API degradation or rate-limiting.
+          summary: "Open-Meteo row count dropped by more than 50%"
+          description: "Current row count is {{ $value }}."
 
-      # ── Quality gate failures ───────────────────────────────────────────────
+      - alert: OpenAQReturnedNoRows
+        expr: med_ops_bronze_openaq_rows < 1
+        for: 1m
+        labels:
+          severity: warning
+          layer: bronze
+        annotations:
+          summary: "OpenAQ ingestion returned no rows"
+          description: "OpenAQ is optional, but a zero-row run may indicate upstream sparsity or rate limiting."
+
       - alert: DataQualityCheckFailed
         expr: pipeline_quality_check_failures_total > 0
         for: 1m
@@ -78,30 +71,27 @@ groups:
           severity: pipeline
         annotations:
           summary: "Data quality check failed: {{ $labels.check_name }}"
-          description: >
-            {{ $value }} failure(s) on check '{{ $labels.check_name }}'
-            in layer '{{ $labels.layer }}'. Investigate quality runner logs.
+          description: "{{ $value }} failure(s) in layer {{ $labels.layer }}."
 
-      # ── Pipeline duration ───────────────────────────────────────────────────
       - alert: BronzeIngestSlow
-        expr: >
-          pipeline_duration_seconds{stage=~"bronze_(openmeteo|openaq)"} > 1800
+        expr: |
+          max(
+            {__name__=~"med_ops_bronze_(openmeteo|openaq|waqi)_duration_seconds"}
+          ) > 1800
         for: 5m
         labels:
           severity: warning
+          layer: bronze
         annotations:
-          summary: "Bronze ingest ({{ $labels.stage }}) taking unusually long"
-          description: >
-            Stage {{ $labels.stage }} took {{ $value | humanizeDuration }}.
-            Expected under 30 minutes. Possible API timeout or MinIO write bottleneck.
+          summary: "A Bronze ingestion stage took over 30 minutes"
+          description: "Longest observed duration is {{ $value | humanizeDuration }}."
 
       - alert: SilverTransformSlow
-        expr: pipeline_duration_seconds{stage="silver_transform"} > 3600
+        expr: med_ops_silver_duration_seconds > 3600
         for: 5m
         labels:
           severity: warning
+          layer: silver
         annotations:
-          summary: "Silver transformation taking >1 hour"
-          description: >
-            Silver transform took {{ $value | humanizeDuration }}.
-            May indicate large partition backlog or Delta write contention.
+          summary: "Silver transformation took over one hour"
+          description: "Observed duration is {{ $value | humanizeDuration }}."

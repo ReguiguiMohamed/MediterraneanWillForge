@@ -109,7 +109,7 @@ class BronzeIngestor(ABC):
         )
         self._freshness_gauge = Gauge(
             f"med_ops_bronze_{src}_last_run_ts",
-            "Unix timestamp of last successful run",
+            "Unix timestamp of last completed run",
             [],
             registry=self._registry,
         )
@@ -204,6 +204,8 @@ class BronzeIngestor(ABC):
         df = self.fetch(target_date)
 
         if df.empty:
+            elapsed = time.monotonic() - t0
+            self._push_metrics(0, elapsed)
             logger.warning(
                 f"[{self.source_name}] fetch() returned 0 rows for {target_date}. "
                 "Upstream source may have no data for this date."

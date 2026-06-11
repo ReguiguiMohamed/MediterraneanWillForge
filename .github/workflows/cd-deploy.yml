@@ -1,7 +1,7 @@
 name: CD — Publish Images
 
 # Triggered manually or automatically when Docker/data code changes on main.
-# Builds and pushes versioned images to GitHub Container Registry (ghcr.io).
+# Builds and pushes commit-SHA, branch, and latest image tags to GHCR.
 # The scheduled data pipeline runs source code directly against Backblaze B2;
 # these images provide reproducible local/job artifacts and a published build
 # record rather than a separate VM deployment target.
@@ -11,7 +11,8 @@ on:
     branches: [main]
     paths:
       - "docker/**"
-      - "data/ingestion/**"
+      - "data/**"
+      - "requirements.txt"
   workflow_dispatch:
     inputs:
       dry_run:

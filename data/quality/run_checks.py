@@ -41,6 +41,7 @@ from great_expectations.data_context.types.base import (
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
+from data.metrics import push_to_grafana
 from data.storage import delta_storage_options
 
 try:
@@ -631,7 +632,8 @@ def _push_results(
     try:
         push_to_gateway(pushgateway_url, job="med_ops_quality", registry=reg)
     except Exception as exc:
-        logger.warning(f"Pushgateway unreachable — metrics not sent: {exc}")
+        logger.warning(f"Pushgateway unreachable - metrics not sent: {exc}")
+    push_to_grafana(reg, job="med_ops_quality")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

@@ -356,6 +356,31 @@ def test_silver_suite_accepts_waqi_source(silver_df):
     assert len(failures) == 0, [r.check_name for r in failures]
 
 
+def test_quality_metrics_are_forwarded_to_grafana(monkeypatch):
+    calls = []
+    monkeypatch.setattr(run_checks, "push_to_gateway", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        run_checks,
+        "push_to_grafana",
+        lambda registry, job: calls.append(job),
+    )
+
+    run_checks._push_results(
+        [
+            run_checks.CheckResult(
+                check_name="row_count_non_zero",
+                layer="silver",
+                table="silver/air_quality",
+                passed=True,
+                severity="fail",
+            )
+        ],
+        "http://localhost:9091",
+    )
+
+    assert calls == ["med_ops_quality"]
+
+
 def test_bronze_suite_detects_missing_required_column(bronze_df):
     bronze_df = bronze_df.drop(columns=["station_id"])
     results = run_bronze_checks(bronze_df, "openmeteo")

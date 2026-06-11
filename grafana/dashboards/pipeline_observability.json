@@ -30,7 +30,7 @@
       }
     ],
     "cursorSync": "Off",
-    "description": "Real-time observability for the Mediterranean air quality data pipeline. Bronze → Silver → Gold stages, per-source row counts, stage durations, and data freshness.",
+    "description": "Daily observability for the Mediterranean air quality pipeline: Bronze, Silver, Gold, quality checks, source row counts, durations, and freshness.",
     "editable": true,
     "elements": {
       "panel-11": {
@@ -416,7 +416,7 @@
                       "group": "prometheus",
                       "version": "v0",
                       "datasource": {"name": "grafanacloud-prom"},
-                      "spec": {"expr": "med_ops_silver_rows", "legendFormat": "silver (total)"}
+                      "spec": {"expr": "med_ops_bronze_waqi_rows", "legendFormat": "bronze / waqi"}
                     },
                     "refId": "C",
                     "hidden": false
@@ -430,9 +430,23 @@
                       "group": "prometheus",
                       "version": "v0",
                       "datasource": {"name": "grafanacloud-prom"},
-                      "spec": {"expr": "med_ops_gold_mart_rows", "legendFormat": "gold (total)"}
+                      "spec": {"expr": "med_ops_silver_rows", "legendFormat": "silver (total)"}
                     },
                     "refId": "D",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {"name": "grafanacloud-prom"},
+                      "spec": {"expr": "med_ops_gold_mart_rows", "legendFormat": "gold (total)"}
+                    },
+                    "refId": "E",
                     "hidden": false
                   }
                 }
@@ -508,7 +522,7 @@
                       "group": "prometheus",
                       "version": "v0",
                       "datasource": {"name": "grafanacloud-prom"},
-                      "spec": {"expr": "med_ops_silver_duration_seconds", "legendFormat": "silver"}
+                      "spec": {"expr": "med_ops_bronze_waqi_duration_seconds", "legendFormat": "bronze / waqi"}
                     },
                     "refId": "C",
                     "hidden": false
@@ -522,9 +536,23 @@
                       "group": "prometheus",
                       "version": "v0",
                       "datasource": {"name": "grafanacloud-prom"},
-                      "spec": {"expr": "med_ops_gold_mart_duration_seconds", "legendFormat": "gold"}
+                      "spec": {"expr": "med_ops_silver_duration_seconds", "legendFormat": "silver"}
                     },
                     "refId": "D",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {"name": "grafanacloud-prom"},
+                      "spec": {"expr": "med_ops_gold_mart_duration_seconds", "legendFormat": "gold"}
+                    },
+                    "refId": "E",
                     "hidden": false
                   }
                 }
@@ -928,6 +956,25 @@
                     "refId": "B",
                     "hidden": false
                   }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "prometheus",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "spec": {
+                        "expr": "time() - last_over_time(med_ops_bronze_waqi_last_run_ts[25h])",
+                        "legendFormat": "waqi"
+                      }
+                    },
+                    "refId": "C",
+                    "hidden": false
+                  }
                 }
               ],
               "transformations": [],
@@ -1057,7 +1104,7 @@
       "hideTimepicker": false,
       "fiscalYearStartMonth": 0
     },
-    "title": "Mediterranean Ops — Pipeline Observability",
+    "title": "MediterraneanWillForge Pipeline Observability",
     "variables": []
   }
 }

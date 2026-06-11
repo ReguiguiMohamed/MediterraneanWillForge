@@ -1,4 +1,4 @@
-# Mediterranean Ops Fortress — Git line-ending policy
+# MediterraneanWillForge line-ending policy
 # Enforce LF everywhere. No CRLF noise on Windows checkouts.
 
 * text=auto eol=lf
@@ -7,17 +7,12 @@
 *.py        text eol=lf
 *.yml       text eol=lf
 *.yaml      text eol=lf
-*.tf        text eol=lf
-*.tfvars    text eol=lf
 *.sh        text eol=lf
 *.md        text eol=lf
 *.json      text eol=lf
 *.sql       text eol=lf
-*.ini       text eol=lf
 *.txt       text eol=lf
-*.j2        text eol=lf
 Makefile    text eol=lf
-Vagrantfile text eol=lf
 Dockerfile  text eol=lf
 .env*       text eol=lf
 
@@ -31,3 +26,6 @@ Dockerfile  text eol=lf
 *.gz    binary
 *.tar   binary
 *.parquet binary
+# Generated report artifacts — keep original line endings
+docs/pipeline_report.html  binary
+docs/pipeline_report.ipynb text eol=lf

@@ -44,3 +44,24 @@ def test_run_fails_when_silver_is_empty(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Silver layer is empty"):
         anomaly.run()
+
+
+def test_anomaly_metrics_use_local_and_hosted_best_effort_paths(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        anomaly,
+        "push_to_gateway",
+        lambda url, job, registry: calls.append(("local", job)),
+    )
+    monkeypatch.setattr(
+        anomaly,
+        "push_to_grafana",
+        lambda registry, job: calls.append(("hosted", job)),
+    )
+
+    anomaly.push_anomaly_metrics(total=12, anomalies=1, elapsed=0.5)
+
+    assert calls == [
+        ("local", "med_ops_gold_anomaly"),
+        ("hosted", "med_ops_gold_anomaly"),
+    ]

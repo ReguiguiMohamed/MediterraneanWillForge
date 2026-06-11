@@ -46,6 +46,7 @@ import numpy as np
 import pandas as pd
 from deltalake import DeltaTable, write_deltalake
 from loguru import logger
+from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 from sklearn.ensemble import IsolationForest
 
 from data.metrics import push_to_grafana
@@ -186,12 +187,10 @@ def run() -> None:
         f"{n_anomalies} anomalies, {elapsed:.1f}s"
     )
 
-    push_to_grafana_anomaly(len(result), n_anomalies, elapsed)
+    push_anomaly_metrics(len(result), n_anomalies, elapsed)
 
 
-def push_to_grafana_anomaly(total: int, anomalies: int, elapsed: float) -> None:
-    from prometheus_client import CollectorRegistry, Gauge
-
+def push_anomaly_metrics(total: int, anomalies: int, elapsed: float) -> None:
     reg = CollectorRegistry()
     Gauge(
         "med_ops_gold_anomaly_rows",
@@ -212,6 +211,11 @@ def push_to_grafana_anomaly(total: int, anomalies: int, elapsed: float) -> None:
         registry=reg,
     ).set(elapsed)
 
+    pushgateway = os.environ.get("PROMETHEUS_PUSHGATEWAY_URL", "http://localhost:9091")
+    try:
+        push_to_gateway(pushgateway, job="med_ops_gold_anomaly", registry=reg)
+    except Exception as exc:
+        logger.warning(f"Pushgateway push failed (best-effort): {exc}")
     push_to_grafana(reg, job="med_ops_gold_anomaly")
 
 

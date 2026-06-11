@@ -1,4 +1,4 @@
-# Mediterranean Ops Fortress - Ingestion Job Image
+# MediterraneanWillForge - pipeline job image
 # Build context: repository root (not docker/ingestion/).
 # docker build -f docker/ingestion/Dockerfile .
 
@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY docker/ingestion/requirements.txt requirements.txt
+COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Keep the real package layout so data.storage and data.metrics imports work.

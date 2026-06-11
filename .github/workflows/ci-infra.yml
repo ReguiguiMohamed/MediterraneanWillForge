@@ -5,11 +5,15 @@ on:
     branches: [main, develop]
     paths:
       - "monitoring/**"
+      - "grafana/**"
+      - "docker/docker-compose*.yml"
       - ".github/workflows/ci-infra.yml"
   pull_request:
     branches: [main]
     paths:
       - "monitoring/**"
+      - "grafana/**"
+      - "docker/docker-compose*.yml"
       - ".github/workflows/ci-infra.yml"
 
 env:

@@ -1,9 +1,9 @@
-# Mediterranean Ops Fortress — Alertmanager Configuration (local dev)
+# MediterraneanWillForge Alertmanager configuration for local development.
 #
 # This file is used when running docker-compose locally.
 # Webhook URLs below are intentional stubs — local dev does not send real alerts.
 #
-# Production-style pipeline alerts are configured in Grafana Cloud. This local
+# Hosted pipeline alerts are configured in Grafana Cloud. This local
 # file exists only to validate routing behavior and support local development.
 #
 # Routing intent:
@@ -67,27 +67,3 @@ receivers:
     webhook_configs:
       - url: "http://localhost:5001/pipeline"
         send_resolved: true
-
-# ---------------------------------------------------------------------------
-# Inhibit rules
-# ---------------------------------------------------------------------------
-inhibit_rules:
-  - source_matchers:
-      - alertname = MinIODown
-      - severity = critical
-    target_matchers:
-      - layer =~ "bronze|silver|gold"
-
-  - source_matchers:
-      - alertname = ContainerDown
-      - severity = critical
-    target_matchers:
-      - severity = warning
-      - alertname =~ "HighCPUUsage|HighMemoryUsage"
-    equal: [name]
-
-  - source_matchers:
-      - severity = critical
-    target_matchers:
-      - severity = warning
-    equal: [alertname]

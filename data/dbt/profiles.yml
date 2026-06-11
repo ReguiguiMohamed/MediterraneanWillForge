@@ -1,4 +1,4 @@
-# dbt connection profile for Mediterranean Ops Fortress.
+# dbt connection profile for MediterraneanWillForge.
 #
 # Adapter: dbt-duckdb, running DuckDB in-process.
 # Storage: Silver Delta data files on MinIO.
