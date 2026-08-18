@@ -245,17 +245,13 @@ jobs:
           QUALITY_PARTITION_DATES="$PIPELINE_DATES" \
             python -m data.quality.run_checks
 
-      - name: Gold — Build marts (Silver → Gold)
+      # Marts and anomaly detection share one Silver scan — running them as two
+      # steps meant two full-table reads per run against the B2 daily cap.
+      - name: Gold — Build marts + anomaly detection (single Silver scan)
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-        run: python -c "from data.ingestion.gold.marts import run; run()"
-
-      - name: Gold — Anomaly detection (Isolation Forest on PM2.5 / O3)
-        env:
-          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
-          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-        run: python -c "from data.ingestion.gold.anomaly import run; run()"
+        run: python -c "from data.ingestion.gold import run_all; run_all()"
 
       - name: Verify — Gold output contracts and requested partitions
         env:

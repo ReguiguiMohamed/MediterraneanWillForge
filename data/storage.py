@@ -6,8 +6,6 @@ import os
 
 import pandas as pd
 from deltalake import DeltaTable
-from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 def delta_storage_options(
@@ -32,22 +30,14 @@ def delta_storage_options(
     }
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=2, min=2, max=15),
-    reraise=True,
-    before_sleep=lambda st: logger.warning(
-        f"Delta read failed (attempt {st.attempt_number}) — retrying: {st.outcome.exception()}"
-    ),
-)
 def read_delta(
     path: str, storage_options: dict[str, str] | None = None
 ) -> pd.DataFrame:
-    """Read a Delta table into pandas, retrying transient object-store faults.
+    """Read a Delta table into pandas.
 
-    B2 intermittently truncates a response body mid-stream ("Generic S3 error:
-    error decoding response body").  object_store only retries faults that occur
-    before response headers arrive, so a mid-body failure has to be retried here.
+    Deliberately has no retry: the failures seen in practice are B2 daily-cap
+    403s, which are not transient — retrying them only burns more of the
+    Class B quota that was already exhausted.
     """
     if storage_options is None:
         storage_options = delta_storage_options()

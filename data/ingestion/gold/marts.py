@@ -141,7 +141,7 @@ def build_wildfire_risk_index(silver_df: pd.DataFrame) -> pd.DataFrame:
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 
-def run() -> None:
+def run(silver_df: pd.DataFrame | None = None) -> None:
     storage_opts = _storage_options()
     silver_bucket = os.environ.get("MINIO_BUCKET_SILVER", "silver")
     gold_bucket = os.environ.get("MINIO_BUCKET_GOLD", "gold")
@@ -167,11 +167,12 @@ def run() -> None:
     logger.info("Gold mart build starting.")
     t_start = time.monotonic()
 
-    silver_path = f"s3://{silver_bucket}/air_quality"
-    try:
-        silver_df = read_delta(silver_path, storage_opts)
-    except Exception as exc:
-        raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
+    if silver_df is None:
+        silver_path = f"s3://{silver_bucket}/air_quality"
+        try:
+            silver_df = read_delta(silver_path, storage_opts)
+        except Exception as exc:
+            raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
 
     if silver_df.empty:
         raise RuntimeError("Silver layer is empty — Gold marts cannot be produced.")
