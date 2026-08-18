@@ -30,7 +30,7 @@ from loguru import logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 from data.metrics import push_to_grafana
-from data.storage import delta_storage_options
+from data.storage import delta_storage_options, read_delta
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -169,8 +169,7 @@ def run() -> None:
 
     silver_path = f"s3://{silver_bucket}/air_quality"
     try:
-        silver_dt = DeltaTable(silver_path, storage_options=storage_opts)
-        silver_df = silver_dt.to_pandas()
+        silver_df = read_delta(silver_path, storage_opts)
     except Exception as exc:
         raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
 

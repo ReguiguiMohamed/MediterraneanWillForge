@@ -7,11 +7,10 @@ import sys
 from dataclasses import dataclass
 
 import pandas as pd
-from deltalake import DeltaTable
 from loguru import logger
 
 from data.quality.run_checks import parse_partition_dates
-from data.storage import delta_storage_options
+from data.storage import delta_storage_options, read_delta
 
 
 @dataclass(frozen=True)
@@ -172,7 +171,7 @@ def verify_gold_outputs(
         path = f"s3://{gold_bucket}/{contract.name}"
         logger.info(f"Checking {path}")
         try:
-            frame = DeltaTable(path, storage_options=options).to_pandas()
+            frame = read_delta(path, options)
         except Exception as exc:
             errors.append(f"gold/{contract.name}: cannot read Delta table — {exc}")
             continue

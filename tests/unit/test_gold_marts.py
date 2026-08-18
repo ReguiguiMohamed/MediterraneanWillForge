@@ -16,15 +16,9 @@ def test_run_fails_when_silver_is_unreadable(monkeypatch):
 
 
 def test_run_fails_when_silver_is_empty(monkeypatch):
-    class EmptyTable:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def to_pandas(self):
-            return pd.DataFrame()
 
     monkeypatch.setattr(marts, "_storage_options", lambda: {})
-    monkeypatch.setattr(marts, "DeltaTable", EmptyTable)
+    monkeypatch.setattr(marts, "read_delta", lambda *a, **k: pd.DataFrame())
 
     with pytest.raises(RuntimeError, match="Silver layer is empty"):
         marts.run()

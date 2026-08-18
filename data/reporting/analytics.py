@@ -4,9 +4,8 @@ import os
 from pathlib import Path
 
 import pandas as pd
-from deltalake import DeltaTable
 
-from data.storage import delta_storage_options
+from data.storage import read_delta
 
 EXCLUDED_COUNTRIES = {"CL", "FR", "GB", "NL", "LY"}
 ANOMALY_MODEL_SOURCES = {"openmeteo", "openaq"}
@@ -149,7 +148,7 @@ def read_gold_table(table: str) -> pd.DataFrame:
     """Read one Gold Delta table using the standard B2/MinIO env vars."""
     gold_bucket = os.environ.get("MINIO_BUCKET_GOLD", "med-ops-mohamed-gold")
     path = f"s3://{gold_bucket}/{table}"
-    return DeltaTable(path, storage_options=delta_storage_options()).to_pandas()
+    return read_delta(path)
 
 
 def write_readiness_diagnostics(
