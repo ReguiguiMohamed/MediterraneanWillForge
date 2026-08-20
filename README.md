@@ -83,6 +83,13 @@ repository free of daily binary churn.
 **Isolation Forest anomaly report**
 ![Anomaly detection](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/anomaly_detection.png)
 
+**Top anomaly of the latest date**
+
+The most anomalous reading of the day, plotted against that day's spread across every
+station — so the reason the Isolation Forest flagged it is visible, not just asserted.
+
+![Top anomaly](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/top_anomaly.png)
+
 **Source coverage**
 ![Source coverage](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/source_coverage.png)
 
