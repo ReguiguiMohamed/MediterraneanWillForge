@@ -37,6 +37,7 @@ jobs:
       AWS_REGION: eu-central-003
       MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
       MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
@@ -54,6 +55,11 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements-report.txt
+
+      # Best-effort: no ANTHROPIC_API_KEY (or an API failure) leaves the report
+      # without the AI section rather than failing the run.
+      - name: AI brief — anomaly fact-check and per-country briefings
+        run: python -m data.reporting.ai_brief
 
       - name: Execute report notebook
         working-directory: docs
@@ -80,6 +86,7 @@ jobs:
           cp docs/pipeline_report.html _site/index.html
           cp docs/reporting_readiness.csv _site/reporting_readiness.csv
           cp docs/*.png _site/assets/
+          [ -f docs/ai_brief.json ] && cp docs/ai_brief.json _site/ai_brief.json
           touch _site/.nojekyll
 
       - name: Upload GitHub Pages artifact

@@ -66,3 +66,6 @@ finalizing cleanups.md
 docs/pipeline_report.html
 docs/reporting_readiness.csv
 docs/*.png
+
+# AI brief output — regenerated each run, published to Pages
+docs/ai_brief.json

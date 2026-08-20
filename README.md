@@ -98,6 +98,32 @@ Also see [pollutant concentrations](https://reguiguimohamed.github.io/Mediterran
 [readiness diagnostics](https://reguiguimohamed.github.io/MediterraneanWillForge/reporting_readiness.csv), and
 [the full rendered report](https://reguiguimohamed.github.io/MediterraneanWillForge/).
 
+## AI Daily Brief
+
+The published report carries two generated sections, written by Claude
+(`claude-opus-5`) from each run's Gold layer:
+
+- **Anomaly fact-check** — the day's top anomaly is passed to the model together
+  with that day's distribution across all stations. The model searches the web for
+  a real-world explanation (wildfire, Saharan dust, heatwave, traffic event) and
+  reports whether the reading is implausible, real and explained, or real and
+  unexplained. It is instructed to report an absence of evidence as an absence of
+  evidence — an uncorroborated anomaly is the normal case, not a prompt to invent
+  a cause — and every external claim carries its source link.
+- **Country briefings** — one to three sentences per country, grounded in that
+  country's own aggregates for the day and compared against WHO 2021 guidelines.
+
+Both are generated text and are labelled as such in the report. Every figure they
+cite comes from the pipeline, not from the model.
+
+Two API calls per run, roughly $0.05/day. To enable, add an `ANTHROPIC_API_KEY`
+repository secret (Settings → Secrets and variables → Actions). **Never commit the
+key** — this is a public repository, and scanners find committed keys in minutes.
+Without the secret the pipeline runs exactly as before and the report simply omits
+the section; the brief is best-effort and never fails a run.
+
+Raw output: [`ai_brief.json`](https://reguiguimohamed.github.io/MediterraneanWillForge/ai_brief.json).
+
 ## Local Setup
 
 Requirements: Python 3.11, Docker with Compose, and Make for the convenience
@@ -176,10 +202,12 @@ tests/               unit and MinIO integration tests
 - WAQI has no historical free-tier endpoint and exposes IAQI, not concentration.
 - The B2 free tier has a Class B transaction limit. Checkpoints reduce reads but
   do not remove that limit.
-- Hosted runs need repository secrets for B2 and WAQI. Grafana secrets are
-  optional.
-- The report is a committed snapshot. Its freshness depends on the scheduled
-  pipeline and report workflows succeeding.
+- Hosted runs need repository secrets for B2 and WAQI. Grafana and
+  `ANTHROPIC_API_KEY` secrets are optional.
+- The report is published to GitHub Pages after each run, not committed. Its
+  freshness depends on the scheduled pipeline and report workflows succeeding.
+- The AI brief is generated text. It is grounded in the pipeline's own numbers and
+  cites sources for external claims, but it is not a substitute for the data.
 - cAdvisor support depends on the Docker host. It is most reliable on Linux.
 - This project has no SLA, Kubernetes deployment, or secrets manager.
 
