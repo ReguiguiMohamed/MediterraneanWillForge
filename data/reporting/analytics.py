@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from data.geo import near_known_city
 from data.storage import read_delta
 
 # Chile, Great Britain and the Netherlands are not Mediterranean. They appear only
@@ -24,14 +25,38 @@ DEFAULT_PUBLIC_DATE_WINDOW = 45
 
 
 def filter_report_countries(df: pd.DataFrame) -> pd.DataFrame:
-    """Remove historical ghost country rows from pre-fix OpenAQ partitions.
+    """Drop rows that do not belong to the geography this report covers.
 
-    Ghost rows only — Marseille (FR) and Tripoli (LY) are real Mediterranean
-    grid points and stay in the report.
+    Two unrelated defects, both of which put foreign stations in the output:
+
+    1. Pre-fix OpenAQ partitions carry CL, GB and NL rows (EXCLUDED_COUNTRIES).
+       Marseille (FR) and Tripoli (LY) are NOT that — they are real
+       Mediterranean grid points and stay.
+    2. WAQI city-name searches matched same-named cities elsewhere, filing
+       Fairfax County under Egypt and Athens, Georgia under Greece. The
+       ingestor now rejects those, but rows written before that fix are still
+       in Silver, so they are dropped here by coordinate. WAQI only: other
+       sources legitimately cover a whole country, not just the anchor cities.
     """
     if df.empty or "country_code" not in df.columns:
         return df.copy()
-    return df[~df["country_code"].isin(EXCLUDED_COUNTRIES)].copy()
+
+    out = df[~df["country_code"].isin(EXCLUDED_COUNTRIES)].copy()
+
+    # WAQI only. OpenAQ and Open-Meteo stations are spread across a whole
+    # country by design — Thessaloniki, Volos and Patra are all legitimately
+    # far from Athens — so judging them against city anchors would throw away
+    # real data. The name-collision bug is specific to WAQI's keyword search.
+    if {"latitude", "longitude", "source"} <= set(out.columns):
+        keep = [
+            src != "waqi" or near_known_city(lat, lon, cc)
+            for src, lat, lon, cc in zip(
+                out["source"], out["latitude"], out["longitude"], out["country_code"]
+            )
+        ]
+        out = out[keep].copy()
+
+    return out
 
 
 def filter_anomaly_model_sources(df: pd.DataFrame) -> pd.DataFrame:

@@ -34,6 +34,8 @@ import requests
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from data.geo import near_known_city
+
 from .base import BronzeIngestor, StorageConfig
 
 _WAQI_BASE = "https://api.waqi.info"
@@ -105,8 +107,14 @@ class WAQIIngestor(BronzeIngestor):
             return None
         return data
 
-    def _search_uids(self, keyword: str) -> list[int]:
-        """Return up to _MAX_PER_QUERY station UIDs matching the keyword."""
+    def _search_uids(self, keyword: str, country_code: str) -> list[int]:
+        """Return up to _MAX_PER_QUERY UIDs that are actually in the target city.
+
+        City names are not unique: a search for Alexandria also returns
+        Alexandria in Virginia and in Romania, and Rabat substring-matches
+        Marseille Rabatau. The search response carries station.geo, so the
+        collisions are dropped here, before spending a feed call on them.
+        """
         try:
             data = self._get(f"{_WAQI_BASE}/search/", {"keyword": keyword})
         except Exception as exc:
@@ -114,8 +122,26 @@ class WAQIIngestor(BronzeIngestor):
             return []
         if not data:
             return []
-        results = data.get("data") or []
-        return [r["uid"] for r in results[:_MAX_PER_QUERY] if "uid" in r]
+
+        uids: list[int] = []
+        for result in data.get("data") or []:
+            if "uid" not in result:
+                continue
+            station = result.get("station") or {}
+            geo = station.get("geo") or []
+            if len(geo) != 2:
+                continue
+            if not near_known_city(geo[0], geo[1], country_code):
+                logger.info(
+                    f"[waqi] '{keyword}' ({country_code}): dropping "
+                    f"{station.get('name', 'unknown')} at {geo[0]},{geo[1]} "
+                    f"— not near a {country_code} target city."
+                )
+                continue
+            uids.append(result["uid"])
+            if len(uids) == _MAX_PER_QUERY:
+                break
+        return uids
 
     def _fetch_feed(self, uid: int) -> dict | None:
         """Fetch full feed for a station UID, including iaqi pollutant breakdown."""
@@ -182,7 +208,7 @@ class WAQIIngestor(BronzeIngestor):
         seen_uids: set[int] = set()
 
         for country_code, keyword in _TARGET_QUERIES:
-            uids = self._search_uids(keyword)
+            uids = self._search_uids(keyword, country_code)
             time.sleep(0.5)
 
             for uid in uids:

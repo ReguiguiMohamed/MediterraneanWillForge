@@ -138,3 +138,21 @@ def test_marseille_and_tripoli_are_not_filtered_out():
     kept = set(filter_report_countries(df)["country_code"])
 
     assert kept == {"FR", "LY", "GR"}, "ghosts dropped, real cities kept"
+
+
+def test_waqi_name_collisions_are_dropped_but_other_sources_are_not():
+    """A Virginia park filed under Egypt goes; a real Greek station stays."""
+    df = pd.DataFrame(
+        {
+            "country_code": ["EG", "GR", "GR", "GR"],
+            "source": ["waqi", "waqi", "openaq", "waqi"],
+            "station_name": ["Fairfax VA", "Athens Georgia", "VOLOS-1", "Aristotelous"],
+            "latitude": [38.773, 33.918, 39.367, 37.988],
+            "longitude": [-77.105, -83.344, 22.943, 23.728],
+        }
+    )
+
+    kept = set(filter_report_countries(df)["station_name"])
+
+    # VOLOS-1 is 200 km from Athens but a genuine OpenAQ station, so it stays.
+    assert kept == {"VOLOS-1", "Aristotelous"}
