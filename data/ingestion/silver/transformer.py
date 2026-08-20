@@ -29,6 +29,7 @@ who_pm25_exceed    int   — 1 if PM2.5 > 15 µg/m³ (WHO 2021)
 who_pm10_exceed    int   — 1 if PM10  > 45 µg/m³
 who_no2_exceed     int   — 1 if NO2   > 25 µg/m³
 who_o3_exceed      int   — 1 if O3    > 100 µg/m³
+pm2_5_source       str   — ground_sensor | model_estimated | model_grid
 data_completeness  float — fraction of the 4 pollutant columns that are non-null
 source             str   — openmeteo | openaq | waqi
 silver_ts          str   — UTC ISO-8601 write timestamp
@@ -49,6 +50,7 @@ from deltalake.exceptions import TableNotFoundError
 from loguru import logger
 from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
 
+from data.ingestion.silver.pm25_patch import patch_missing_pm25
 from data.metrics import push_to_grafana
 from data.storage import delta_storage_options
 
@@ -85,6 +87,7 @@ _SILVER_COLUMNS = [
     "pm10",
     "nitrogen_dioxide",
     "ozone",
+    "pm2_5_source",
     "aqi_category",
     "who_pm25_exceed",
     "who_pm10_exceed",
@@ -102,6 +105,7 @@ _STRING_COLUMNS = [
     "city",
     "country_code",
     "date",
+    "pm2_5_source",
     "aqi_category",
     "source",
     "silver_ts",
@@ -413,6 +417,9 @@ def run() -> None:
                     raw_df["partition_date"] = partition
 
                 cleaned = clean(raw_df, source)
+                # Patch before enrich: aqi_category, who_pm25_exceed and
+                # data_completeness are all derived from pm2_5.
+                cleaned = patch_missing_pm25(cleaned, source, partition)
                 enriched = enrich(cleaned)
 
                 if enriched.empty:
