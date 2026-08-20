@@ -7,24 +7,25 @@ import pytest
 from data.reporting import ai_brief
 
 
-def _text_block(text):
-    return SimpleNamespace(type="text", text=text)
+def _citation(url, title):
+    return SimpleNamespace(type="url_citation", url=url, title=title)
 
 
-def _response(blocks, stop_reason="end_turn"):
-    return SimpleNamespace(content=blocks, stop_reason=stop_reason)
+def _interaction(text, annotations=None):
+    """Mimic a google-genai Interaction: output_text plus annotated steps."""
+    block = SimpleNamespace(type="text", text=text, annotations=annotations or [])
+    step = SimpleNamespace(type="model_output", content=[block])
+    return SimpleNamespace(output_text=text, steps=[step])
 
 
 class _Client:
-    """Stand-in for anthropic.Anthropic that returns a canned response."""
+    """Stand-in for genai.Client that returns a canned interaction."""
 
-    def __init__(self, response):
-        self.messages = SimpleNamespace(create=lambda **kw: self._record(kw, response))
+    def __init__(self, interaction):
         self.calls = []
-
-    def _record(self, kwargs, response):
-        self.calls.append(kwargs)
-        return response
+        self.interactions = SimpleNamespace(
+            create=lambda **kw: (self.calls.append(kw), interaction)[1]
+        )
 
 
 ANOMALY = {
@@ -41,17 +42,15 @@ ANOMALY = {
 STATS = {"pm2_5": 12.9, "ozone": 72.1, "nitrogen_dioxide": 13.4, "stations": 77}
 
 
-def test_fact_check_collects_verdict_and_sources():
-    search = SimpleNamespace(
-        type="web_search_tool_result",
-        content=[
-            SimpleNamespace(url="https://example.org/a", title="Athens traffic"),
-            SimpleNamespace(url="https://example.org/b", title="Air quality alert"),
+def test_fact_check_collects_verdict_and_citations():
+    interaction = _interaction(
+        "Plausible. NO2 77.1 is traffic.",
+        annotations=[
+            _citation("https://example.org/a", "Athens traffic"),
+            _citation("https://example.org/b", "Air quality alert"),
         ],
     )
-    client = _Client(
-        _response([search, _text_block("Plausible. NO2 77.1 is traffic.")])
-    )
+    client = _Client(interaction)
 
     out = ai_brief.fact_check_anomaly(ANOMALY, STATS, client)
 
@@ -61,30 +60,50 @@ def test_fact_check_collects_verdict_and_sources():
         "https://example.org/a",
         "https://example.org/b",
     ]
-    # Web search must actually be enabled on the request.
-    tools = client.calls[0]["tools"]
-    assert tools[0]["type"] == "web_search_20260209"
-    assert client.calls[0]["model"] == "claude-opus-5"
+    # Google Search grounding must actually be enabled on the request.
+    assert client.calls[0]["tools"] == [{"type": "google_search"}]
+    assert client.calls[0]["model"] == "gemini-3.7-flash"
 
 
-def test_fact_check_survives_a_web_search_error_block():
-    """A search error returns an object, not a list — it must not crash."""
-    err = SimpleNamespace(
-        type="web_search_tool_result",
-        content=SimpleNamespace(error_code="max_uses_exceeded"),
+def test_fact_check_deduplicates_repeated_citations():
+    """The same source cited on several spans is one source, not many."""
+    interaction = _interaction(
+        "Real but unexplained.",
+        annotations=[
+            _citation("https://example.org/a", "Athens"),
+            _citation("https://example.org/a", "Athens"),
+        ],
     )
-    client = _Client(_response([err, _text_block("No corroboration found.")]))
 
-    out = ai_brief.fact_check_anomaly(ANOMALY, STATS, client)
+    out = ai_brief.fact_check_anomaly(ANOMALY, STATS, _Client(interaction))
+
+    assert len(out["sources"]) == 1
+
+
+def test_fact_check_without_citations_reports_no_search():
+    out = ai_brief.fact_check_anomaly(
+        ANOMALY, STATS, _Client(_interaction("No corroboration found."))
+    )
 
     assert out["verdict"] == "No corroboration found."
     assert out["sources"] == []
     assert out["searched"] is False
 
 
-def test_fact_check_returns_none_on_refusal():
-    client = _Client(_response([_text_block("x")], stop_reason="refusal"))
-    assert ai_brief.fact_check_anomaly(ANOMALY, STATS, client) is None
+def test_fact_check_survives_a_response_without_steps():
+    """A shape change should cost the citations, not the whole brief."""
+    bare = SimpleNamespace(output_text="Verdict text.", steps=None)
+
+    out = ai_brief.fact_check_anomaly(ANOMALY, STATS, _Client(bare))
+
+    assert out["verdict"] == "Verdict text."
+    assert out["sources"] == []
+
+
+def test_fact_check_returns_none_on_empty_output():
+    assert (
+        ai_brief.fact_check_anomaly(ANOMALY, STATS, _Client(_interaction(""))) is None
+    )
 
 
 def _summary():
@@ -109,29 +128,28 @@ def test_country_briefings_parses_structured_output():
             {"country_code": "TN", "briefing": "PM2.5 averaged 30.0 ug/m3."},
         ]
     }
-    client = _Client(_response([_text_block(json.dumps(payload))]))
+    client = _Client(_interaction(json.dumps(payload)))
 
     out = ai_brief.country_briefings(_summary(), client)
 
     assert [b["country_code"] for b in out] == ["GR", "TN"]
-    # The schema must be enforced server-side, not hoped for.
-    schema = client.calls[0]["output_config"]["format"]
-    assert schema["type"] == "json_schema"
-    assert schema["schema"]["required"] == ["briefings"]
+    # JSON shape must be enforced by the API, not hoped for.
+    fmt = client.calls[0]["response_format"]
+    assert fmt["mime_type"] == "application/json"
+    assert fmt["schema"]["required"] == ["briefings"]
     # Countries are aggregated across sources before being sent.
-    sent = json.loads(client.calls[0]["messages"][0]["content"].split("\n\n", 1)[1])
+    sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
     assert {r["country_code"] for r in sent} == {"GR", "TN"}
     assert next(r for r in sent if r["country_code"] == "GR")["stations"] == 6
 
 
-def test_country_briefings_returns_empty_on_refusal():
-    client = _Client(_response([_text_block("{}")], stop_reason="refusal"))
-    assert ai_brief.country_briefings(_summary(), client) == []
+def test_country_briefings_returns_empty_on_empty_output():
+    assert ai_brief.country_briefings(_summary(), _Client(_interaction(""))) == []
 
 
 def test_run_without_api_key_writes_nothing(tmp_path, monkeypatch):
     """A fork with no key must skip quietly, never break the pipeline."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     out = tmp_path / "ai_brief.json"
 
     def explode(*a, **k):  # pragma: no cover

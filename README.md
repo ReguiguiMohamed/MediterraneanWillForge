@@ -100,34 +100,36 @@ Also see [pollutant concentrations](https://reguiguimohamed.github.io/Mediterran
 
 ## AI Daily Brief
 
-The published report carries two generated sections, written by Claude
-(`claude-opus-5`) from each run's Gold layer:
+The published report carries two generated sections, written by Gemini
+(`gemini-3.7-flash`) from each run's Gold layer:
 
 - **Anomaly fact-check** — the day's top anomaly is passed to the model together
-  with that day's distribution across all stations. The model searches the web for
-  a real-world explanation (wildfire, Saharan dust, heatwave, traffic event) and
-  reports whether the reading is implausible, real and explained, or real and
-  unexplained. It is instructed to report an absence of evidence as an absence of
-  evidence — an uncorroborated anomaly is the normal case, not a prompt to invent
-  a cause — and every external claim carries its source link.
+  with that day's distribution across all stations. Using Grounding with Google
+  Search, the model looks for a real-world explanation (wildfire, Saharan dust,
+  heatwave, traffic event) and reports whether the reading is implausible, real
+  and explained, or real and unexplained. It is instructed to report an absence of
+  evidence as an absence of evidence — an uncorroborated anomaly is the normal
+  case, not a prompt to invent a cause — and every external claim carries its
+  source link.
 - **Country briefings** — one to three sentences per country, grounded in that
   country's own aggregates for the day and compared against WHO 2021 guidelines.
 
 Both are generated text and are labelled as such in the report. Every figure they
 cite comes from the pipeline, not from the model.
 
-Two API calls per run. The Anthropic API is pay-as-you-go — there is no free tier,
-only a small trial credit on new accounts. At `claude-opus-5` rates ($5/MTok in,
-$25/MTok out) plus web search at $10 per 1,000 searches, this costs roughly
-**$0.10–0.25 per day (~$3–8/month)**, dominated by the search calls and the search
-results they pull into context. `_MAX_SEARCHES` in `data/reporting/ai_brief.py`
-caps searches per run; lowering it is the main cost dial.
+**This runs entirely on Gemini's free tier.** Flash text tokens are free, and
+Search grounding on Gemini 3.x includes 5,000 free requests per month; this
+pipeline uses roughly 30 (one per day). Gemini was chosen specifically because it
+is the only major provider whose free tier includes real search grounding — Groq,
+Cerebras and the free OpenRouter models have no search, and the Anthropic and
+OpenAI APIs have no free tier at all.
 
-To enable, add an `ANTHROPIC_API_KEY` repository secret (Settings → Secrets and
-variables → Actions). **Never commit the key** — this is a public repository, and
-scanners find committed keys within minutes. Without the secret the pipeline runs
-exactly as before and the report simply omits the section; the brief is
-best-effort and never fails a run.
+To enable, get a key from [Google AI Studio](https://aistudio.google.com/apikey)
+(no card required) and add it as a `GEMINI_API_KEY` repository secret
+(Settings → Secrets and variables → Actions). **Never commit the key** — this is a
+public repository, and scanners find committed keys within minutes. Without the
+secret the pipeline runs exactly as before and the report simply omits the
+section; the brief is best-effort and never fails a run.
 
 Raw output: [`ai_brief.json`](https://reguiguimohamed.github.io/MediterraneanWillForge/ai_brief.json).
 
@@ -210,7 +212,7 @@ tests/               unit and MinIO integration tests
 - The B2 free tier has a Class B transaction limit. Checkpoints reduce reads but
   do not remove that limit.
 - Hosted runs need repository secrets for B2 and WAQI. Grafana and
-  `ANTHROPIC_API_KEY` secrets are optional.
+  `GEMINI_API_KEY` secrets are optional.
 - The report is published to GitHub Pages after each run, not committed. Its
   freshness depends on the scheduled pipeline and report workflows succeeding.
 - The AI brief is generated text. It is grounded in the pipeline's own numbers and

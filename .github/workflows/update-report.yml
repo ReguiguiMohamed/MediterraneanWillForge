@@ -37,7 +37,7 @@ jobs:
       AWS_REGION: eu-central-003
       MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
       MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       PYTHONPATH: ${{ github.workspace }}
 
     steps:
@@ -56,7 +56,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-report.txt
 
-      # Best-effort: no ANTHROPIC_API_KEY (or an API failure) leaves the report
+      # Best-effort: no GEMINI_API_KEY (or an API failure) leaves the report
       # without the AI section rather than failing the run.
       - name: AI brief — anomaly fact-check and per-country briefings
         run: python -m data.reporting.ai_brief

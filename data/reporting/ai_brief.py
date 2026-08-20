@@ -1,12 +1,12 @@
 """
 data/reporting/ai_brief.py
 ──────────────────────────
-Narrative layer over the latest Gold day, written by Claude.
+Narrative layer over the latest Gold day, written by Gemini.
 
 Two artefacts, one API call each:
 
   1. A fact-check of the day's top anomaly. The model is given the flagged
-     reading and that day's distribution, and searches the web for corroborating
+     reading and that day's distribution, and searches Google for corroborating
      real-world conditions (wildfire, dust intrusion, heatwave, traffic event).
      It is told to report an absence of evidence as an absence of evidence — an
      uncorroborated anomaly is a normal outcome, not a prompt to invent a cause.
@@ -14,9 +14,15 @@ Two artefacts, one API call each:
   2. A one-to-three sentence briefing per country, grounded in that country's
      own Gold aggregates for the day.
 
-Both are best-effort. No API key, an API error, or a malformed response leaves
-the report without this section rather than failing the pipeline — this runs
-after the data is already safely in Gold, and no narrative is worth losing a run.
+Why Gemini: it is the only provider whose free tier includes real search
+grounding. Flash text tokens are free, and Search grounding on Gemini 3.x
+allows 5,000 free requests per month — this pipeline uses about 30. The whole
+feature costs nothing at this volume.
+
+Both artefacts are best-effort. No API key, an API error, or a malformed
+response leaves the report without this section rather than failing the
+pipeline — this runs after the data is already safely in Gold, and no narrative
+is worth losing a run.
 
 Output: docs/ai_brief.json, gitignored and published to Pages with the report.
 """
@@ -33,10 +39,7 @@ from loguru import logger
 
 from data.storage import read_delta
 
-MODEL = "claude-opus-5"
-_MAX_TOKENS = 4096
-# ponytail: cap searches per run — this is a daily cron, not an investigation.
-_MAX_SEARCHES = 4
+MODEL = "gemini-3.7-flash"
 
 _FACT_CHECK_SYSTEM = """You are auditing an automated air-quality anomaly detector.
 
@@ -68,29 +71,61 @@ Rules:
 - Plain, factual, non-alarmist. No advice, no speculation about causes you cannot
   see in the data.
 - If a country's station count is low, say the reading is based on few stations.
-- Do not begin every entry with the country name."""
+- Do not begin every entry with the country name.
+- Return one entry for every country given, and no others."""
+
+_BRIEFING_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "briefings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "country_code": {"type": "string"},
+                    "briefing": {"type": "string"},
+                },
+                "required": ["country_code", "briefing"],
+            },
+        }
+    },
+    "required": ["briefings"],
+}
 
 
 def _client():
-    """Return an Anthropic client, or None when no key is configured."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        logger.warning("ANTHROPIC_API_KEY not set — skipping AI brief.")
+    """Return a Gemini client, or None when no key is configured."""
+    if not os.environ.get("GEMINI_API_KEY"):
+        logger.warning("GEMINI_API_KEY not set — skipping AI brief.")
         return None
     try:
-        import anthropic
+        from google import genai
     except ImportError:
-        logger.warning("anthropic package not installed — skipping AI brief.")
+        logger.warning("google-genai not installed — skipping AI brief.")
         return None
-    return anthropic.Anthropic()
-
-
-def _text(response) -> str:
-    """Concatenate the text blocks of a response, ignoring tool-result blocks."""
-    return "\n".join(b.text for b in response.content if b.type == "text").strip()
+    return genai.Client()
 
 
 def _round(value, digits: int = 1):
     return None if pd.isna(value) else round(float(value), digits)
+
+
+def _citations(interaction) -> list[dict]:
+    """Pull url_citation annotations out of an interaction's model output.
+
+    Traversed defensively: a shape change in the SDK should cost the citation
+    list, not the whole brief.
+    """
+    seen: dict[str, str] = {}
+    for step in getattr(interaction, "steps", None) or []:
+        for block in getattr(step, "content", None) or []:
+            for note in getattr(block, "annotations", None) or []:
+                if getattr(note, "type", None) != "url_citation":
+                    continue
+                url = getattr(note, "url", None)
+                if url and url not in seen:
+                    seen[url] = getattr(note, "title", "") or url
+    return [{"title": title, "url": url} for url, title in seen.items()]
 
 
 def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
@@ -113,44 +148,19 @@ def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
         "Is this reading plausible, and does anything explain it?"
     )
 
-    response = client.messages.create(
+    interaction = client.interactions.create(
         model=MODEL,
-        max_tokens=_MAX_TOKENS,
-        system=_FACT_CHECK_SYSTEM,
-        thinking={"type": "adaptive"},
-        tools=[
-            {
-                "type": "web_search_20260209",
-                "name": "web_search",
-                "max_uses": _MAX_SEARCHES,
-            }
-        ],
-        messages=[{"role": "user", "content": prompt}],
+        system_instruction=_FACT_CHECK_SYSTEM,
+        input=prompt,
+        tools=[{"type": "google_search"}],
     )
 
-    if response.stop_reason == "refusal":
-        logger.warning("Anomaly fact-check refused — skipping.")
-        return None
-
-    sources = []
-    for block in response.content:
-        if block.type != "web_search_tool_result":
-            continue
-        # A successful search returns a list; an error returns a single object.
-        if not isinstance(block.content, list):
-            code = getattr(block.content, "error_code", block.content)
-            logger.warning(f"Web search error: {code}")
-            continue
-        for result in block.content:
-            url = getattr(result, "url", None)
-            if url:
-                title = getattr(result, "title", "") or url
-                sources.append({"title": title, "url": url})
-
-    verdict = _text(response)
+    verdict = (interaction.output_text or "").strip()
     if not verdict:
+        logger.warning("Anomaly fact-check returned no text.")
         return None
 
+    sources = _citations(interaction)
     return {
         "station": anomaly["station_name"],
         "country_code": anomaly["country_code"],
@@ -180,53 +190,27 @@ def country_briefings(latest: pd.DataFrame, client) -> list[dict]:
     if not rows:
         return []
 
-    response = client.messages.create(
+    interaction = client.interactions.create(
         model=MODEL,
-        max_tokens=_MAX_TOKENS,
-        system=_BRIEFING_SYSTEM,
-        thinking={"type": "adaptive"},
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Write a briefing for each country below. Values are ug/m3 "
-                    "daily means; who_pm25_exceed_pct is the fraction of "
-                    "station-days above the WHO PM2.5 guideline.\n\n"
-                    + json.dumps(rows, indent=2)
-                ),
-            }
-        ],
-        output_config={
-            "format": {
-                "type": "json_schema",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "briefings": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "country_code": {"type": "string"},
-                                    "briefing": {"type": "string"},
-                                },
-                                "required": ["country_code", "briefing"],
-                                "additionalProperties": False,
-                            },
-                        }
-                    },
-                    "required": ["briefings"],
-                    "additionalProperties": False,
-                },
-            }
+        system_instruction=_BRIEFING_SYSTEM,
+        input=(
+            "Write a briefing for each country below. Values are ug/m3 daily "
+            "means; who_pm25_exceed_pct is the fraction of station-days above "
+            "the WHO PM2.5 guideline.\n\n" + json.dumps(rows, indent=2)
+        ),
+        response_format={
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": _BRIEFING_SCHEMA,
         },
     )
 
-    if response.stop_reason == "refusal":
-        logger.warning("Country briefings refused — skipping.")
+    text = (interaction.output_text or "").strip()
+    if not text:
+        logger.warning("Country briefings returned no text.")
         return []
 
-    return json.loads(_text(response)).get("briefings", [])
+    return json.loads(text).get("briefings", [])
 
 
 def run(output_path: str | Path = "docs/ai_brief.json") -> None:
