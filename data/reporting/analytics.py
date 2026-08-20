@@ -7,13 +7,28 @@ import pandas as pd
 
 from data.storage import read_delta
 
-EXCLUDED_COUNTRIES = {"CL", "FR", "GB", "NL", "LY"}
+# Chile, Great Britain and the Netherlands are not Mediterranean. They appear only
+# in openaq partitions from 2026-03-31 to 2026-05-03, when the OpenAQ ingestor
+# still filtered by a `country` string that the v3 API ignored, so it returned
+# arbitrary global stations. The countries_id fix ended it; these are dead
+# historical rows with numeric station ids.
+#
+# FR and LY were in this list too, and should not have been: their only rows are
+# the Marseille and Tripoli grid points that copernicus_ingestor deliberately
+# ingests as Mediterranean cities. Excluding them hid five months of legitimate
+# daily data from every chart. Anything added here must be a genuine ingestion
+# artefact, not a country that merely looks out of place.
+EXCLUDED_COUNTRIES = {"CL", "GB", "NL"}
 ANOMALY_MODEL_SOURCES = {"openmeteo", "openaq"}
 DEFAULT_PUBLIC_DATE_WINDOW = 45
 
 
 def filter_report_countries(df: pd.DataFrame) -> pd.DataFrame:
-    """Remove historical ghost country rows from pre-fix OpenAQ partitions."""
+    """Remove historical ghost country rows from pre-fix OpenAQ partitions.
+
+    Ghost rows only — Marseille (FR) and Tripoli (LY) are real Mediterranean
+    grid points and stay in the report.
+    """
     if df.empty or "country_code" not in df.columns:
         return df.copy()
     return df[~df["country_code"].isin(EXCLUDED_COUNTRIES)].copy()

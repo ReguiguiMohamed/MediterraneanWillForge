@@ -180,7 +180,7 @@ def test_run_excludes_ghost_countries_the_charts_exclude(tmp_path, monkeypatch):
     summary = pd.DataFrame(
         {
             "partition_date": ["2026-08-19"] * 3,
-            "country_code": ["GR", "FR", "TN"],
+            "country_code": ["GR", "NL", "TN"],
             "station_count": [4, 1, 3],
             "mean_pm2_5": [12.0, 7.3, 30.0],
             "max_pm2_5": [20.0, 9.0, 44.0],
@@ -203,4 +203,4 @@ def test_run_excludes_ghost_countries_the_charts_exclude(tmp_path, monkeypatch):
     ai_brief.run(tmp_path / "ai_brief.json")
 
     sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
-    assert {r["country_code"] for r in sent} == {"GR", "TN"}, "FR must be filtered out"
+    assert {r["country_code"] for r in sent} == {"GR", "TN"}, "NL ghost must go"

@@ -4,6 +4,7 @@ from data.reporting.analytics import (
     anomaly_daily_rates,
     coverage_by_date,
     filter_anomaly_model_sources,
+    filter_report_countries,
     latest_reporting_dates,
     mark_coverage_readiness,
     reporting_dates,
@@ -116,3 +117,24 @@ def test_coverage_by_date_tracks_source_mix():
     assert coverage.loc[0, "station_days"] == 4
     assert coverage.loc[0, "source_count"] == 2
     assert coverage.loc[0, "sources"] == "openmeteo, waqi"
+
+
+def test_marseille_and_tripoli_are_not_filtered_out():
+    """FR and LY are real Mediterranean grid points, not OpenAQ ghosts."""
+    df = pd.DataFrame(
+        {
+            "country_code": ["FR", "LY", "GR", "CL", "GB", "NL"],
+            "source": [
+                "openmeteo",
+                "openmeteo",
+                "openaq",
+                "openaq",
+                "openaq",
+                "openaq",
+            ],
+        }
+    )
+
+    kept = set(filter_report_countries(df)["country_code"])
+
+    assert kept == {"FR", "LY", "GR"}, "ghosts dropped, real cities kept"
