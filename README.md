@@ -68,25 +68,28 @@ More detail: [architecture](docs/architecture.md) and
 
 ## Results
 
-The notebook, rendered HTML, readiness diagnostics, and all charts are committed
-under `docs/`.
+Every chart below is rebuilt from the live Gold layer after each pipeline run and
+published to **[reguiguimohamed.github.io/MediterraneanWillForge](https://reguiguimohamed.github.io/MediterraneanWillForge/)**.
+The report source notebook lives at [`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb);
+its rendered output is served from Pages rather than committed, to keep the
+repository free of daily binary churn.
 
 **Station coverage by country and date**
-![Coverage heatmap](docs/coverage_heatmap.png)
+![Coverage heatmap](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/coverage_heatmap.png)
 
 **WHO guideline exceedance**
-![WHO exceedance](docs/who_exceedance.png)
+![WHO exceedance](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/who_exceedance.png)
 
 **Isolation Forest anomaly report**
-![Anomaly detection](docs/anomaly_detection.png)
+![Anomaly detection](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/anomaly_detection.png)
 
 **Source coverage**
-![Source coverage](docs/source_coverage.png)
+![Source coverage](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/source_coverage.png)
 
-Also see [pollutant concentrations](docs/pollutants_by_country.png),
-[wildfire risk](docs/wildfire_risk.png),
-[the notebook](docs/pipeline_report.ipynb), and
-[the rendered report](docs/pipeline_report.html).
+Also see [pollutant concentrations](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/pollutants_by_country.png),
+[wildfire risk](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/wildfire_risk.png),
+[readiness diagnostics](https://reguiguimohamed.github.io/MediterraneanWillForge/reporting_readiness.csv), and
+[the full rendered report](https://reguiguimohamed.github.io/MediterraneanWillForge/).
 
 ## Local Setup
 

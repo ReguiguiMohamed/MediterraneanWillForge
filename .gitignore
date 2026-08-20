@@ -60,3 +60,9 @@ CHECKPOINT.md
 checkpoint.md
 next_iterations.md
 finalizing cleanups.md
+
+# Report artifacts — regenerated each run and published straight to GitHub Pages,
+# never committed (they were 99% of this repo's git history).
+docs/pipeline_report.html
+docs/reporting_readiness.csv
+docs/*.png
