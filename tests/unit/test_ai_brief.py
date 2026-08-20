@@ -205,3 +205,19 @@ def test_run_excludes_ghost_countries_the_charts_exclude(tmp_path, monkeypatch):
 
     sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
     assert {r["country_code"] for r in sent} == {"GR", "TN"}, "NL ghost must go"
+
+
+def test_briefings_parse_tolerates_markdown_fences():
+    payload = '```json\n{"briefings": [{"country_code": "GR", "briefing": "ok"}]}\n```'
+    client = _Client(_interaction(payload))
+
+    out = ai_brief.country_briefings(_summary(), client)
+
+    assert out == [{"country_code": "GR", "briefing": "ok"}]
+
+
+def test_briefings_parse_returns_empty_on_prose():
+    """Non-JSON must cost the section, not raise out of the brief."""
+    client = _Client(_interaction("Here are the briefings you asked for:"))
+
+    assert ai_brief.country_briefings(_summary(), client) == []

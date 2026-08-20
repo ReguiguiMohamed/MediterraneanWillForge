@@ -119,6 +119,27 @@ def _round(value, digits: int = 1):
     return None if pd.isna(value) else round(float(value), digits)
 
 
+def _parse_briefings(text: str) -> list[dict]:
+    """Parse the briefings payload, tolerating a markdown-fenced response.
+
+    response_format asks for bare JSON, but a fenced ```json block is a common
+    way for it to come back anyway; stripping the fence is cheaper than losing
+    the section. Anything else is logged with a snippet so the next failure is
+    diagnosable from the run log instead of a re-run.
+    """
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split(chr(10), 1)[-1]
+        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    try:
+        return json.loads(cleaned).get("briefings", [])
+    except (json.JSONDecodeError, AttributeError):
+        logger.warning(
+            f"Briefings response was not JSON. First 300 chars: {text[:300]!r}"
+        )
+        return []
+
+
 def _citations(interaction) -> list[dict]:
     """Pull url_citation annotations out of an interaction's model output.
 
@@ -220,7 +241,7 @@ def country_briefings(latest: pd.DataFrame, client) -> list[dict]:
         logger.warning("Country briefings returned no text.")
         return []
 
-    return json.loads(text).get("briefings", [])
+    return _parse_briefings(text)
 
 
 def run(output_path: str | Path = "docs/ai_brief.json") -> None:
