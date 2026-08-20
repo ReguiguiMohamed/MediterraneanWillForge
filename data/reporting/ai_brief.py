@@ -15,9 +15,8 @@ Two artefacts, one API call each:
      own Gold aggregates for the day.
 
 Why Gemini: it is the only provider whose free tier includes real search
-grounding. Flash text tokens are free, and Search grounding on Gemini 3.x
-allows 5,000 free requests per month — this pipeline uses about 30. The whole
-feature costs nothing at this volume.
+grounding. Flash text tokens are free, and 2.5 Flash allows 500 grounded
+requests a day free — this pipeline uses one. The whole feature costs nothing.
 
 Both artefacts are best-effort. No API key, an API error, or a malformed
 response leaves the report without this section rather than failing the
@@ -40,6 +39,12 @@ from loguru import logger
 from data.storage import read_delta
 
 MODEL = "gemini-3.7-flash"
+
+# The fact-check needs Google Search grounding, and on the free tier that is a
+# 2.5-only feature: Gemini 3.x reports "Not available" for free-tier grounding and
+# returns 429 quota-exceeded, while 2.5 Flash allows 500 grounded requests a day
+# free. Do not consolidate these two constants without re-checking that.
+SEARCH_MODEL = "gemini-2.5-flash"
 
 _FACT_CHECK_SYSTEM = """You are auditing an automated air-quality anomaly detector.
 
@@ -149,7 +154,7 @@ def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
     )
 
     interaction = client.interactions.create(
-        model=MODEL,
+        model=SEARCH_MODEL,
         system_instruction=_FACT_CHECK_SYSTEM,
         input=prompt,
         tools=[{"type": "google_search"}],
@@ -164,6 +169,7 @@ def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
     return {
         "station": anomaly["station_name"],
         "country_code": anomaly["country_code"],
+        "model": SEARCH_MODEL,
         "verdict": verdict,
         "sources": sources[:6],
         "searched": bool(sources),
