@@ -143,6 +143,8 @@ def test_country_briefings_parses_structured_output():
     sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
     assert {r["country_code"] for r in sent} == {"GR", "TN"}
     assert next(r for r in sent if r["country_code"] == "GR")["stations"] == 6
+    # Briefings need response_format, which only 3.x honours.
+    assert client.calls[0]["model"] == ai_brief.MODEL == "gemini-3.7-flash"
 
 
 def test_country_briefings_returns_empty_on_empty_output():
@@ -221,3 +223,16 @@ def test_briefings_parse_returns_empty_on_prose():
     client = _Client(_interaction("Here are the briefings you asked for:"))
 
     assert ai_brief.country_briefings(_summary(), client) == []
+
+
+def test_rate_limit_is_retried_but_other_errors_are_not():
+    """429 is transient; a bad request is not worth three round trips."""
+    assert ai_brief._is_rate_limited(RuntimeError("Error code: 429 - quota")) is True
+    assert ai_brief._is_rate_limited(RuntimeError("too_many_requests")) is True
+    assert ai_brief._is_rate_limited(RuntimeError("400 invalid argument")) is False
+
+
+def test_the_two_models_are_not_the_same():
+    """Consolidating breaks either grounding or structured output."""
+    assert ai_brief.MODEL != ai_brief.SEARCH_MODEL
+    assert ai_brief.SEARCH_MODEL.startswith("gemini-2.5")

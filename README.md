@@ -100,8 +100,8 @@ Also see [pollutant concentrations](https://reguiguimohamed.github.io/Mediterran
 
 ## AI Daily Brief
 
-The published report carries two generated sections, written by Gemini
-(`gemini-2.5-flash`) from each run's Gold layer:
+The published report carries two generated sections, written by Gemini from
+each run's Gold layer:
 
 - **Anomaly fact-check** — the day's top anomaly is passed to the model together
   with that day's distribution across all stations. Using Grounding with Google
@@ -119,9 +119,13 @@ cite comes from the pipeline, not from the model.
 
 **This runs entirely on Gemini's free tier.** Flash text tokens are free, and
 2.5 Flash allows 500 grounded search requests per day free; this pipeline makes
-two calls a day. Both run on `gemini-2.5-flash` rather than 3.x on purpose: on
-the free tier Search grounding is a 2.5-only feature, and 3.7-flash additionally
-caps generate_content at 20 requests. Gemini was chosen because it is the
+two calls a day.
+
+The two sections deliberately use different models, because neither does both
+jobs: the briefings need a `response_format` JSON schema, which `gemini-3.7-flash`
+honours and `gemini-2.5-flash` ignores (it returns prose); the fact-check needs
+Search grounding, which is free on 2.5 and unavailable on 3.x's free tier.
+Gemini was chosen because it is the
 only major provider whose free tier includes real search grounding — Groq,
 Cerebras and the free OpenRouter models have no search, and the Anthropic and
 OpenAI APIs have no free tier at all.

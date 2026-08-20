@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pandas as pd
 from loguru import logger
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from data.reporting.analytics import (
     filter_anomaly_model_sources,
@@ -42,13 +43,18 @@ from data.reporting.analytics import (
 )
 from data.storage import read_delta
 
-# 2.5 Flash for both calls. Two separate free-tier limits pushed us here:
-# grounding is unavailable on Gemini 3.x free tier (a grounded 3.x request is
-# rejected outright), and 3.7-flash free tier caps generate_content at 20
-# requests, which this pipeline tripped. 2.5 Flash allows 500 grounded requests
-# a day and has the headroom for the text call too.
-MODEL = "gemini-2.5-flash"
-SEARCH_MODEL = MODEL
+# Two models, because neither can do both jobs. Established by running each:
+#
+#   response_format JSON schema  3.7-flash honours it; 2.5-flash ignores it and
+#                                returns prose, which cost us the section.
+#   Google Search grounding      2.5-flash has it free (500/day); on 3.x the
+#                                free tier reports "Not available" and a
+#                                grounded request 429s outright.
+#
+# So briefings (schema, no search) run on 3.7 and the fact-check (search, no
+# schema) runs on 2.5. Do not consolidate: either direction breaks one half.
+MODEL = "gemini-3.7-flash"
+SEARCH_MODEL = "gemini-2.5-flash"
 
 _FACT_CHECK_SYSTEM = """You are auditing an automated air-quality anomaly detector.
 
@@ -119,6 +125,22 @@ def _round(value, digits: int = 1):
     return None if pd.isna(value) else round(float(value), digits)
 
 
+def _is_rate_limited(exc: BaseException) -> bool:
+    """True for 429s. 3.7-flash allows 20 requests/minute on the free tier."""
+    return "429" in str(exc) or "too_many_requests" in str(exc).lower()
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=4, min=4, max=30),
+    retry=retry_if_exception(_is_rate_limited),
+    reraise=True,
+)
+def _create(client, **kwargs):
+    """Call the API, retrying only a rate-limit bump."""
+    return client.interactions.create(**kwargs)
+
+
 def _parse_briefings(text: str) -> list[dict]:
     """Parse the briefings payload, tolerating a markdown-fenced response.
 
@@ -178,7 +200,8 @@ def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
         "Is this reading plausible, and does anything explain it?"
     )
 
-    interaction = client.interactions.create(
+    interaction = _create(
+        client,
         model=SEARCH_MODEL,
         system_instruction=_FACT_CHECK_SYSTEM,
         input=prompt,
@@ -221,7 +244,8 @@ def country_briefings(latest: pd.DataFrame, client) -> list[dict]:
     if not rows:
         return []
 
-    interaction = client.interactions.create(
+    interaction = _create(
+        client,
         model=MODEL,
         system_instruction=_BRIEFING_SYSTEM,
         input=(
