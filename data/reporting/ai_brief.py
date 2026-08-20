@@ -36,6 +36,10 @@ from pathlib import Path
 import pandas as pd
 from loguru import logger
 
+from data.reporting.analytics import (
+    filter_anomaly_model_sources,
+    filter_report_countries,
+)
 from data.storage import read_delta
 
 MODEL = "gemini-3.7-flash"
@@ -225,8 +229,12 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         return
 
     gold = os.environ.get("MINIO_BUCKET_GOLD", "gold")
-    summary = read_delta(f"s3://{gold}/daily_country_summary")
-    anomalies = read_delta(f"s3://{gold}/anomaly_alerts")
+    # Same filters the charts use — a briefing about a country the report excludes
+    # would contradict every figure next to it.
+    summary = filter_report_countries(read_delta(f"s3://{gold}/daily_country_summary"))
+    anomalies = filter_anomaly_model_sources(
+        filter_report_countries(read_delta(f"s3://{gold}/anomaly_alerts"))
+    )
 
     latest_date = str(summary["partition_date"].max())
     latest = summary[summary["partition_date"] == latest_date]
@@ -242,8 +250,10 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         "briefings": [],
     }
 
-    day = anomalies[anomalies["partition_date"] == latest_date]
     try:
+        # Inside the try: an empty or unexpectedly-shaped anomaly table must cost
+        # the fact-check only, never the briefings that follow.
+        day = anomalies[anomalies["partition_date"] == latest_date]
         if not day.empty:
             top = day.nsmallest(1, "anomaly_score").iloc[0]
             stats = {

@@ -171,3 +171,36 @@ def test_round_handles_missing_values():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_run_excludes_ghost_countries_the_charts_exclude(tmp_path, monkeypatch):
+    """The narrative must cover the same countries as the charts beside it."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    summary = pd.DataFrame(
+        {
+            "partition_date": ["2026-08-19"] * 3,
+            "country_code": ["GR", "FR", "TN"],
+            "station_count": [4, 1, 3],
+            "mean_pm2_5": [12.0, 7.3, 30.0],
+            "max_pm2_5": [20.0, 9.0, 44.0],
+            "mean_pm10": [30.0, 13.2, 60.0],
+            "mean_no2": [20.0, 8.2, 11.0],
+            "mean_o3": [70.0, 78.8, 90.0],
+            "who_pm25_exceed_pct": [0.25, 0.0, 1.0],
+        }
+    )
+    payload = {"briefings": [{"country_code": "GR", "briefing": "ok"}]}
+    client = _Client(_interaction(json.dumps(payload)))
+
+    monkeypatch.setattr(ai_brief, "_client", lambda: client)
+    monkeypatch.setattr(
+        ai_brief,
+        "read_delta",
+        lambda path: summary if "daily_country_summary" in path else pd.DataFrame(),
+    )
+
+    ai_brief.run(tmp_path / "ai_brief.json")
+
+    sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
+    assert {r["country_code"] for r in sent} == {"GR", "TN"}, "FR must be filtered out"
