@@ -64,6 +64,7 @@ def test_fact_check_collects_verdict_and_citations():
     assert client.calls[0]["tools"] == [{"type": "google_search"}]
     # Grounding is free-tier only on 2.5, so the search call must not use 3.x.
     assert client.calls[0]["model"] == ai_brief.SEARCH_MODEL == "gemini-2.5-flash"
+    assert not ai_brief.SEARCH_MODEL.startswith("gemini-3")
 
 
 def test_fact_check_deduplicates_repeated_citations():

@@ -16,7 +16,7 @@ Two artefacts, one API call each:
 
 Why Gemini: it is the only provider whose free tier includes real search
 grounding. Flash text tokens are free, and 2.5 Flash allows 500 grounded
-requests a day free — this pipeline uses one. The whole feature costs nothing.
+requests a day free — this pipeline uses two calls a day. Costs nothing.
 
 Both artefacts are best-effort. No API key, an API error, or a malformed
 response leaves the report without this section rather than failing the
@@ -42,13 +42,13 @@ from data.reporting.analytics import (
 )
 from data.storage import read_delta
 
-MODEL = "gemini-3.7-flash"
-
-# The fact-check needs Google Search grounding, and on the free tier that is a
-# 2.5-only feature: Gemini 3.x reports "Not available" for free-tier grounding and
-# returns 429 quota-exceeded, while 2.5 Flash allows 500 grounded requests a day
-# free. Do not consolidate these two constants without re-checking that.
-SEARCH_MODEL = "gemini-2.5-flash"
+# 2.5 Flash for both calls. Two separate free-tier limits pushed us here:
+# grounding is unavailable on Gemini 3.x free tier (a grounded 3.x request is
+# rejected outright), and 3.7-flash free tier caps generate_content at 20
+# requests, which this pipeline tripped. 2.5 Flash allows 500 grounded requests
+# a day and has the headroom for the text call too.
+MODEL = "gemini-2.5-flash"
+SEARCH_MODEL = MODEL
 
 _FACT_CHECK_SYSTEM = """You are auditing an automated air-quality anomaly detector.
 
