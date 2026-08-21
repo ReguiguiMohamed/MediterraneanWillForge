@@ -62,9 +62,9 @@ def test_fact_check_collects_verdict_and_citations():
     ]
     # Google Search grounding must actually be enabled on the request.
     assert client.calls[0]["tools"] == [{"type": "google_search"}]
-    # Grounding is free-tier only on 2.5, so the search call must not use 3.x.
-    assert client.calls[0]["model"] == ai_brief.SEARCH_MODEL == "gemini-2.5-flash"
-    assert not ai_brief.SEARCH_MODEL.startswith("gemini-3")
+    # Grounding is free-tier only on 2.5, so no rung of the search ladder is 3.x.
+    assert client.calls[0]["model"] == ai_brief.SEARCH_MODELS[0] == "gemini-2.5-flash"
+    assert not any(m.startswith("gemini-3") for m in ai_brief.SEARCH_MODELS)
 
 
 def test_fact_check_deduplicates_repeated_citations():
@@ -132,8 +132,9 @@ def test_country_briefings_parses_structured_output():
     }
     client = _Client(_interaction(json.dumps(payload)))
 
-    out = ai_brief.country_briefings(_summary(), client)
+    model, out = ai_brief.country_briefings(_summary(), client)
 
+    assert model == ai_brief.BRIEFING_MODELS[0] == "gemini-3.7-flash"
     assert [b["country_code"] for b in out] == ["GR", "TN"]
     # JSON shape must be enforced by the API, not hoped for.
     fmt = client.calls[0]["response_format"]
@@ -143,12 +144,16 @@ def test_country_briefings_parses_structured_output():
     sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
     assert {r["country_code"] for r in sent} == {"GR", "TN"}
     assert next(r for r in sent if r["country_code"] == "GR")["stations"] == 6
-    # Briefings need response_format, which only 3.x honours.
-    assert client.calls[0]["model"] == ai_brief.MODEL == "gemini-3.7-flash"
+    # response_format is sent even though only 3.x honours it; the lower rungs
+    # fall back on the prompt asking for bare JSON.
+    assert "JSON" in ai_brief._BRIEFING_SYSTEM
 
 
-def test_country_briefings_returns_empty_on_empty_output():
-    assert ai_brief.country_briefings(_summary(), _Client(_interaction(""))) == []
+def test_country_briefings_returns_empty_when_no_model_answers():
+    assert ai_brief.country_briefings(_summary(), _Client(_interaction(""))) == (
+        None,
+        [],
+    )
 
 
 def test_run_without_api_key_writes_nothing(tmp_path, monkeypatch):
@@ -213,8 +218,9 @@ def test_briefings_parse_tolerates_markdown_fences():
     payload = '```json\n{"briefings": [{"country_code": "GR", "briefing": "ok"}]}\n```'
     client = _Client(_interaction(payload))
 
-    out = ai_brief.country_briefings(_summary(), client)
+    model, out = ai_brief.country_briefings(_summary(), client)
 
+    assert model == ai_brief.BRIEFING_MODELS[0]
     assert out == [{"country_code": "GR", "briefing": "ok"}]
 
 
@@ -222,7 +228,9 @@ def test_briefings_parse_returns_empty_on_prose():
     """Non-JSON must cost the section, not raise out of the brief."""
     client = _Client(_interaction("Here are the briefings you asked for:"))
 
-    assert ai_brief.country_briefings(_summary(), client) == []
+    assert ai_brief.country_briefings(_summary(), client) == (None, [])
+    # Prose from one model is not an answer: every rung got a turn.
+    assert [c["model"] for c in client.calls] == list(ai_brief.BRIEFING_MODELS)
 
 
 def test_rate_limit_is_retried_but_other_errors_are_not():
@@ -232,7 +240,58 @@ def test_rate_limit_is_retried_but_other_errors_are_not():
     assert ai_brief._is_rate_limited(RuntimeError("400 invalid argument")) is False
 
 
-def test_the_two_models_are_not_the_same():
+def test_the_two_ladders_lead_with_different_models():
     """Consolidating breaks either grounding or structured output."""
-    assert ai_brief.MODEL != ai_brief.SEARCH_MODEL
-    assert ai_brief.SEARCH_MODEL.startswith("gemini-2.5")
+    assert ai_brief.BRIEFING_MODELS[0] != ai_brief.SEARCH_MODELS[0]
+    assert ai_brief.SEARCH_MODELS[0].startswith("gemini-2.5")
+    # Every ladder needs somewhere to fall.
+    assert len(ai_brief.BRIEFING_MODELS) > 1
+    assert len(ai_brief.SEARCH_MODELS) > 1
+
+
+def test_briefings_fall_back_to_the_next_model_when_a_quota_is_spent(monkeypatch):
+    """A 429 is counted per model, so the ladder steps down, one retry apart."""
+    monkeypatch.setattr(ai_brief._create.retry, "sleep", lambda _seconds: None)
+    payload = {"briefings": [{"country_code": "GR", "briefing": "ok"}]}
+    spent, fallback = ai_brief.BRIEFING_MODELS[:2]
+    calls = []
+
+    def create(**kw):
+        calls.append(kw["model"])
+        if kw["model"] == spent:
+            raise RuntimeError("Error code: 429 - quota exceeded, limit: 20")
+        return _interaction(json.dumps(payload))
+
+    client = SimpleNamespace(interactions=SimpleNamespace(create=create))
+
+    model, out = ai_brief.country_briefings(_summary(), client)
+
+    assert (model, out) == (fallback, payload["briefings"])
+    assert calls == [spent, spent, fallback], "one retry, then down the ladder"
+
+
+def test_fact_check_falls_back_and_reports_the_model_that_answered():
+    fallback = ai_brief.SEARCH_MODELS[1]
+
+    def create(**kw):
+        if kw["model"] != fallback:
+            raise RuntimeError("400 model not found")
+        return _interaction("Plausible.")
+
+    client = SimpleNamespace(interactions=SimpleNamespace(create=create))
+
+    out = ai_brief.fact_check_anomaly(ANOMALY, STATS, client)
+
+    assert out["model"] == fallback
+    assert out["verdict"] == "Plausible."
+
+
+def test_a_fully_spent_ladder_costs_the_section_not_the_run(monkeypatch):
+    monkeypatch.setattr(ai_brief._create.retry, "sleep", lambda _seconds: None)
+
+    def create(**kw):
+        raise RuntimeError("Error code: 429 - quota exceeded")
+
+    client = SimpleNamespace(interactions=SimpleNamespace(create=create))
+
+    assert ai_brief.fact_check_anomaly(ANOMALY, STATS, client) is None

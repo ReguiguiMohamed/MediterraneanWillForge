@@ -3,7 +3,9 @@ data/reporting/ai_brief.py
 ──────────────────────────
 Narrative layer over the latest Gold day, written by Gemini.
 
-Two artefacts, one API call each:
+Two artefacts, one API call each, though each call walks a ladder of models and
+takes the first that answers, so a spent free-tier quota costs a better model
+rather than the whole section:
 
   1. A fact-check of the day's top anomaly. The model is given the flagged
      reading and that day's distribution, and searches Google for corroborating
@@ -43,18 +45,23 @@ from data.reporting.analytics import (
 )
 from data.storage import read_delta
 
-# Two models, because neither can do both jobs. Established by running each:
+# A ladder per job, tried in order, first model that answers wins. Free-tier
+# quota is counted per model, so a 429 means step down the ladder, not wait.
+# What each job needs, established by running them:
 #
-#   response_format JSON schema  3.7-flash honours it; 2.5-flash ignores it and
-#                                returns prose, which cost us the section.
-#   Google Search grounding      2.5-flash has it free (500/day); on 3.x the
-#                                free tier reports "Not available" and a
-#                                grounded request 429s outright.
+#   response_format JSON schema  3.7-flash honours it; 2.5-flash ignores it, so
+#                                the prompt asks for bare JSON as well and the
+#                                parser tolerates a fence. Belt and braces beats
+#                                a section that only one model can produce.
+#   Google Search grounding      free on 2.5; on 3.x the free tier reports
+#                                "Not available" and a grounded request 429s
+#                                outright, so 3.x never enters the search ladder.
 #
-# So briefings (schema, no search) run on 3.7 and the fact-check (search, no
-# schema) runs on 2.5. Do not consolidate: either direction breaks one half.
-MODEL = "gemini-3.7-flash"
-SEARCH_MODEL = "gemini-2.5-flash"
+# Ordered best-first: the head of each ladder gives the best answer, the tail
+# has the loosest free-tier quota. 3.7-flash allows 20 requests/day free and is
+# routinely spent by mid-morning, which is exactly what the ladder is for.
+BRIEFING_MODELS = ("gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite")
+SEARCH_MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite")
 
 _FACT_CHECK_SYSTEM = """You are auditing an automated air-quality anomaly detector.
 
@@ -87,7 +94,10 @@ Rules:
   see in the data.
 - If a country's station count is low, say the reading is based on few stations.
 - Do not begin every entry with the country name.
-- Return one entry for every country given, and no others."""
+- Return one entry for every country given, and no others.
+
+Answer with bare JSON and nothing else, no markdown fence, no preamble:
+{"briefings": [{"country_code": "XX", "briefing": "..."}]}"""
 
 _BRIEFING_SCHEMA = {
     "type": "object",
@@ -126,19 +136,48 @@ def _round(value, digits: int = 1):
 
 
 def _is_rate_limited(exc: BaseException) -> bool:
-    """True for 429s. 3.7-flash allows 20 requests/minute on the free tier."""
+    """True for 429s, whether a per-minute bump or a spent daily quota."""
     return "429" in str(exc) or "too_many_requests" in str(exc).lower()
 
 
 @retry(
-    stop=stop_after_attempt(3),
+    stop=stop_after_attempt(2),
     wait=wait_exponential(multiplier=4, min=4, max=30),
     retry=retry_if_exception(_is_rate_limited),
     reraise=True,
 )
 def _create(client, **kwargs):
-    """Call the API, retrying only a rate-limit bump."""
+    """Call the API, retrying a rate-limit bump once.
+
+    One retry, not three: a spent daily quota never clears within the run, and
+    the next model down the ladder is a better answer to a 429 than waiting.
+    """
     return client.interactions.create(**kwargs)
+
+
+def _first_working(client, models, extract, **kwargs):
+    """Run the same request down a ladder of models; first usable answer wins.
+
+    `extract` turns an interaction into the artefact and returns something
+    falsy when the response is unusable: empty text, or prose where JSON was
+    asked for. That counts as a failure of that model, so the ladder continues
+    rather than accepting an empty section from the first model that replied.
+
+    Returns (model, artefact), or (None, None) when the whole ladder is spent.
+    Every failure is non-fatal by design: no narrative is worth a pipeline.
+    """
+    for model in models:
+        try:
+            artefact = extract(_create(client, model=model, **kwargs))
+        except Exception as exc:
+            logger.warning(f"{model} failed: {exc}")
+            continue
+        if artefact:
+            logger.info(f"{model} answered.")
+            return model, artefact
+        logger.warning(f"{model} returned nothing usable.")
+    logger.warning(f"No model answered: {', '.join(models)}")
+    return None, None
 
 
 def _parse_briefings(text: str) -> list[dict]:
@@ -200,32 +239,34 @@ def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
         "Is this reading plausible, and does anything explain it?"
     )
 
-    interaction = _create(
+    def _verdict(interaction):
+        text = (interaction.output_text or "").strip()
+        return (text, _citations(interaction)) if text else None
+
+    model, answer = _first_working(
         client,
-        model=SEARCH_MODEL,
+        SEARCH_MODELS,
+        _verdict,
         system_instruction=_FACT_CHECK_SYSTEM,
         input=prompt,
         tools=[{"type": "google_search"}],
     )
-
-    verdict = (interaction.output_text or "").strip()
-    if not verdict:
-        logger.warning("Anomaly fact-check returned no text.")
+    if answer is None:
         return None
 
-    sources = _citations(interaction)
+    verdict, sources = answer
     return {
         "station": anomaly["station_name"],
         "country_code": anomaly["country_code"],
-        "model": SEARCH_MODEL,
+        "model": model,
         "verdict": verdict,
         "sources": sources[:6],
         "searched": bool(sources),
     }
 
 
-def country_briefings(latest: pd.DataFrame, client) -> list[dict]:
-    """One to three sentences per country for the latest day."""
+def country_briefings(latest: pd.DataFrame, client) -> tuple[str | None, list[dict]]:
+    """One to three sentences per country, and the model that wrote them."""
     rows = []
     for country, grp in latest.groupby("country_code"):
         rows.append(
@@ -242,11 +283,12 @@ def country_briefings(latest: pd.DataFrame, client) -> list[dict]:
         )
 
     if not rows:
-        return []
+        return None, []
 
-    interaction = _create(
+    model, briefings = _first_working(
         client,
-        model=MODEL,
+        BRIEFING_MODELS,
+        lambda interaction: _parse_briefings(interaction.output_text or ""),
         system_instruction=_BRIEFING_SYSTEM,
         input=(
             "Write a briefing for each country below. Values are ug/m3 daily "
@@ -259,13 +301,7 @@ def country_briefings(latest: pd.DataFrame, client) -> list[dict]:
             "schema": _BRIEFING_SCHEMA,
         },
     )
-
-    text = (interaction.output_text or "").strip()
-    if not text:
-        logger.warning("Country briefings returned no text.")
-        return []
-
-    return _parse_briefings(text)
+    return model, briefings or []
 
 
 def run(output_path: str | Path = "docs/ai_brief.json") -> None:
@@ -289,7 +325,7 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
 
     brief: dict = {
         "generated_at": datetime.now(tz=timezone.utc).isoformat(),
-        "model": MODEL,
+        "model": None,
         "date": latest_date,
         "fact_check": None,
         "briefings": [],
@@ -326,7 +362,10 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         logger.warning(f"Anomaly fact-check failed (non-fatal): {exc}")
 
     try:
-        brief["briefings"] = country_briefings(latest, client)
+        model, brief["briefings"] = country_briefings(latest, client)
+        # The report caption names the model that actually answered, which the
+        # ladder makes a runtime fact rather than a constant.
+        brief["model"] = model or (brief["fact_check"] or {}).get("model")
     except Exception as exc:
         logger.warning(f"Country briefings failed (non-fatal): {exc}")
 
@@ -338,7 +377,8 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(brief, indent=2, ensure_ascii=False), encoding="utf-8")
     logger.success(
-        f"AI brief written: {len(brief['briefings'])} briefing(s), "
+        f"AI brief written: {len(brief['briefings'])} briefing(s) "
+        f"via {brief['model'] or 'no model'}, "
         f"fact-check={'yes' if brief['fact_check'] else 'no'} -> {out}"
     )
 

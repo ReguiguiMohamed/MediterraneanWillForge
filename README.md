@@ -100,10 +100,16 @@ Two short generated sections in the report, both from that run's Gold layer:
 Both are labelled as generated text in the report. Every figure comes from the
 pipeline, not the model.
 
-This runs on Gemini's free tier at no cost. The two sections use different
+This runs on Gemini's free tier at no cost. The two sections start on different
 models because neither does both jobs: briefings need a `response_format` JSON
 schema, which `gemini-3.7-flash` honours and `gemini-2.5-flash` ignores; the
 fact-check needs Search grounding, free on 2.5 and unavailable on 3.x.
+
+Each section then walks a ladder of models and keeps the first usable answer.
+Free-tier quota is counted per model, and `gemini-3.7-flash` allows only 20
+requests a day, so a spent quota drops the section to `gemini-2.5-flash` and
+then `gemini-2.5-flash-lite` instead of dropping it from the report. The caption
+names whichever model actually wrote it.
 
 To turn it on, get a key from [Google AI Studio](https://aistudio.google.com/apikey)
 (no card needed) and add it as a `GEMINI_API_KEY` repository secret under
