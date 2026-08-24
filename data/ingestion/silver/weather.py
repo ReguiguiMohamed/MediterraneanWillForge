@@ -42,6 +42,7 @@ partition_date       str   — YYYY-MM-DD (Delta partition key)
 
 from __future__ import annotations
 
+import os
 import time
 from datetime import timezone
 
@@ -51,7 +52,11 @@ from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
-from data.ingestion.silver.transformer import SilverConfig, _unprocessed_partitions
+from data.ingestion.silver.transformer import (
+    SilverConfig,
+    _dates_from_files,
+    _unprocessed_partitions,
+)
 from data.metrics import push_to_grafana
 
 SOURCE = "openmeteo_weather"
@@ -213,7 +218,15 @@ def _canonicalize_for_delta(df: pd.DataFrame) -> pd.DataFrame:
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 
-def run() -> None:
+def run(rebuild: bool = False) -> None:
+    """Transform new Bronze weather partitions into Silver.
+
+    `rebuild` reprocesses every Bronze partition and replaces the Silver table
+    instead of appending. Silver is incremental by partition, so a Bronze
+    partition that was corrected in place is invisible to an ordinary run:
+    Silver has already recorded that date as done. Pair it with the Bronze
+    ingestor's own rebuild.
+    """
     cfg = SilverConfig.from_env()
     bronze_path = f"s3://{cfg.bronze_bucket}/openmeteo_weather/weather"
     silver_path = f"s3://{cfg.silver_bucket}/weather"
@@ -241,8 +254,12 @@ def run() -> None:
     logger.info("Silver weather transformation starting.")
     t_start = time.monotonic()
 
-    partitions = _unprocessed_partitions(
-        bronze_path, silver_path, SOURCE, cfg.storage_options
+    partitions = (
+        _all_bronze_partitions(bronze_path, cfg.storage_options)
+        if rebuild
+        else _unprocessed_partitions(
+            bronze_path, silver_path, SOURCE, cfg.storage_options
+        )
     )
 
     total_rows = 0
@@ -250,10 +267,11 @@ def run() -> None:
         logger.info("[weather] Silver up to date — nothing to process.")
     else:
         logger.info(
-            f"[weather] Processing {len(partitions)} new partition(s): {partitions}"
+            f"[weather] {'Rebuilding' if rebuild else 'Processing'} "
+            f"{len(partitions)} partition(s): {partitions[0]} … {partitions[-1]}"
         )
         total_rows = _transform_partitions(
-            bronze_path, silver_path, partitions, cfg.storage_options
+            bronze_path, silver_path, partitions, cfg.storage_options, rebuild
         )
 
     elapsed = time.monotonic() - t_start
@@ -270,11 +288,23 @@ def run() -> None:
     logger.success(f"Silver weather complete — {total_rows} rows, {elapsed:.1f}s")
 
 
+def _all_bronze_partitions(
+    bronze_path: str, storage_options: dict[str, str]
+) -> list[str]:
+    """Every partition_date present in Bronze weather."""
+    return sorted(
+        _dates_from_files(
+            DeltaTable(bronze_path, storage_options=storage_options).files()
+        )
+    )
+
+
 def _transform_partitions(
     bronze_path: str,
     silver_path: str,
     partitions: list[str],
     storage_options: dict[str, str],
+    rebuild: bool = False,
 ) -> int:
     """Transform and write the given Bronze partitions in one Delta write.
 
@@ -316,14 +346,16 @@ def _transform_partitions(
         return 0
 
     batch = pd.concat(frames, ignore_index=True)
+    # A rebuild covers every Bronze partition, so overwriting the whole table
+    # replaces exactly what was there and nothing more.
     write_deltalake(
         silver_path,
         batch,
-        mode="append",
+        mode="overwrite" if rebuild else "append",
         engine="rust",
         partition_by=["partition_date", "source"],
         storage_options=storage_options,
-        schema_mode="merge",
+        schema_mode="overwrite" if rebuild else "merge",
     )
     try:
         DeltaTable(silver_path, storage_options=storage_options).create_checkpoint()
@@ -337,4 +369,4 @@ def _transform_partitions(
 
 
 if __name__ == "__main__":
-    run()
+    run(rebuild=os.environ.get("WEATHER_REBUILD", "").lower() == "true")

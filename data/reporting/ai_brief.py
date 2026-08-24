@@ -129,6 +129,14 @@ _BRIEFING_SCHEMA = {
 }
 
 
+# The SDK waits forever by default. A request that never answers held a report
+# build for twenty minutes before it was killed by hand, and the ladder below
+# cannot step to the next model until the current one returns something, even
+# an error. Grounded search legitimately takes tens of seconds, so the bar is
+# set well above a slow answer and well below a stalled one.
+_REQUEST_TIMEOUT_MS = 180_000
+
+
 def _client():
     """Return a Gemini client, or None when no key is configured."""
     if not os.environ.get("GEMINI_API_KEY"):
@@ -139,7 +147,7 @@ def _client():
     except ImportError:
         logger.warning("google-genai not installed — skipping AI brief.")
         return None
-    return genai.Client()
+    return genai.Client(http_options={"timeout": _REQUEST_TIMEOUT_MS})
 
 
 def _round(value, digits: int = 1):

@@ -212,3 +212,66 @@ def test_a_country_takes_the_worst_of_its_cities():
     assert latest["temp_max_c"] == 41.0
     assert latest["heat_alert"] == "extreme_heatwave"
     assert latest["condition"] == "thunderstorm"
+
+
+# ── Bronze range ingest ────────────────────────────────────────────────────────
+
+
+def test_range_timeout_grows_with_the_range():
+    from datetime import date
+
+    from data.ingestion.bronze import weather_ingestor as wi
+
+    one_day = date(2026, 8, 23)
+    assert wi._timeout(one_day, one_day) == 30
+    assert wi._timeout(date(2026, 3, 31), one_day) == 175
+    # A request for a decade still gets a bounded wait.
+    assert wi._timeout(date(2016, 1, 1), one_day) == wi._MAX_TIMEOUT
+
+
+def test_a_partial_range_is_refused_rather_than_written():
+    """One city short must not mark the whole range present."""
+    from datetime import date
+
+    from data.ingestion.bronze import weather_ingestor as wi
+
+    ingestor = wi.WeatherIngestor.__new__(wi.WeatherIngestor)
+    partial = pd.DataFrame(
+        {
+            "station_id": ["tunis_tn", "tunis_tn"],
+            "partition_date": ["2026-08-22", "2026-08-23"],
+        }
+    )
+    ingestor._existing_partition_dates = lambda: set()
+    ingestor._fetch_range = lambda start, end: partial
+    ingestor._write = lambda df: pytest.fail("a partial range must not be written")
+
+    with pytest.raises(RuntimeError, match="Range ingest incomplete"):
+        ingestor.run_range(date(2026, 8, 22), date(2026, 8, 23))
+
+
+def test_rebuild_replaces_a_range_a_plain_run_would_skip():
+    """The repair path: present partitions are refetched, not skipped."""
+    from datetime import date
+
+    from data.ingestion.bronze import weather_ingestor as wi
+
+    ingestor = wi.WeatherIngestor.__new__(wi.WeatherIngestor)
+    complete = pd.DataFrame(
+        {
+            "station_id": [c[0] for c in wi.MEDITERRANEAN_CITIES],
+            "partition_date": ["2026-08-22"] * len(wi.MEDITERRANEAN_CITIES),
+        }
+    )
+    calls = []
+    ingestor._existing_partition_dates = lambda: pytest.fail(
+        "a rebuild must not consult the existing partitions"
+    )
+    ingestor._fetch_range = lambda start, end: complete
+    ingestor._replace = lambda df, start, end: calls.append(("replace", start, end))
+    ingestor._write = lambda df: pytest.fail("a rebuild must replace, not append")
+    ingestor._push_metrics = lambda rows, elapsed: None
+
+    ingestor.run_range(date(2026, 8, 22), date(2026, 8, 22), rebuild=True)
+
+    assert calls == [("replace", date(2026, 8, 22), date(2026, 8, 22))]

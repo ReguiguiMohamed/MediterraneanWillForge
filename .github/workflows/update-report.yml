@@ -28,6 +28,9 @@ jobs:
   build-report:
     name: Run Notebook and Stage Report Site
     runs-on: ubuntu-latest
+    # Belt to the AI brief's own request timeout: whatever else stalls, the job
+    # gives up long before the six-hour default burns an afternoon of minutes.
+    timeout-minutes: 45
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
 
     env:

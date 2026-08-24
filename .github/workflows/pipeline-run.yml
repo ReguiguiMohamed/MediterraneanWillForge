@@ -37,6 +37,11 @@ on:
         description: "Weather-only backfill end (YYYY-MM-DD, inclusive). Pair with weather_backfill_start."
         required: false
         default: ""
+      weather_rebuild:
+        description: "Refetch and replace the weather backfill range instead of skipping dates already present. Needed after ERA5 revises its values, or to repair a range that lost a city."
+        type: boolean
+        required: false
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24:  "true"
@@ -51,6 +56,7 @@ env:
   BACKFILL_END:                        ${{ inputs.backfill_end }}
   WEATHER_BACKFILL_START:              ${{ inputs.weather_backfill_start }}
   WEATHER_BACKFILL_END:                ${{ inputs.weather_backfill_end }}
+  WEATHER_REBUILD:                     ${{ inputs.weather_rebuild }}
   OPENAQ_API_KEY:                      ${{ secrets.OPENAQ_API_KEY }}
   WAQI_API_KEY:                        ${{ secrets.WAQI_API_KEY }}
   GRAFANA_REMOTE_WRITE_URL:            ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
@@ -259,13 +265,14 @@ jobs:
           def env(name):
               return os.environ.get(name, "").strip()
 
-          start = env("WEATHER_BACKFILL_START") or env("BACKFILL_START")
-          end_s = env("WEATHER_BACKFILL_END") or env("BACKFILL_END")
-          td    = env("TARGET_DATE")
+          start   = env("WEATHER_BACKFILL_START") or env("BACKFILL_START")
+          end_s   = env("WEATHER_BACKFILL_END") or env("BACKFILL_END")
+          td      = env("TARGET_DATE")
+          rebuild = env("WEATHER_REBUILD").lower() == "true"
 
           if start and end_s:
-              print(f"=== weather: range {start} -> {end_s} ===")
-              run_range(date.fromisoformat(start), date.fromisoformat(end_s))
+              print(f"=== weather: range {start} -> {end_s} rebuild={rebuild} ===")
+              run_range(date.fromisoformat(start), date.fromisoformat(end_s), rebuild)
           elif td:
               print(f"=== weather: {td} ===")
               run(date.fromisoformat(td))
@@ -279,11 +286,19 @@ jobs:
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: python -c "from data.ingestion.silver.transformer import run; run()"
 
+      # A rebuilt Bronze partition is invisible to an incremental Silver run:
+      # Silver has already recorded that date as done. The flag has to reach
+      # both halves or the corrected rows never leave Bronze.
       - name: Silver — Weather (Bronze → Silver)
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-        run: python -c "from data.ingestion.silver.weather import run; run()"
+        run: |
+          python -c "
+          import os
+          from data.ingestion.silver.weather import run
+          run(rebuild=os.environ.get('WEATHER_REBUILD', '').lower() == 'true')
+          "
 
       - name: Quality — Validate requested Bronze and Silver partitions
         env:

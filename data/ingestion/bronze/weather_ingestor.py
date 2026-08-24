@@ -30,6 +30,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 import requests
+from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -38,7 +39,19 @@ from .copernicus_ingestor import MEDITERRANEAN_CITIES
 
 _ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 _AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
-_REQUEST_TIMEOUT = 30  # seconds
+
+# A day's request answers in under a second; a five-month range is a far bigger
+# response and a slower query behind it. A flat 30s read timeout was enough for
+# eleven cities of a 146-day backfill and not for the twelfth, which lost Beirut
+# for the whole range. Give a range the time its size asks for.
+_BASE_TIMEOUT = 30  # seconds for a single day
+_MAX_TIMEOUT = 240
+
+
+def _timeout(start: date, end: date) -> int:
+    """Read timeout scaled to the number of days requested."""
+    return min(_BASE_TIMEOUT + (end - start).days, _MAX_TIMEOUT)
+
 
 # Open-Meteo daily variable → canonical column, units in the name so nothing
 # downstream has to remember that gusts arrive in km/h rather than m/s.
@@ -78,21 +91,33 @@ class WeatherIngestor(BronzeIngestor):
 
     # ── Range ingest ──────────────────────────────────────────────────────────
 
-    def run_range(self, date_from: date, date_to: date) -> None:
+    def run_range(self, date_from: date, date_to: date, rebuild: bool = False) -> None:
         """Fetch every missing date in [date_from, date_to] in one pass.
 
         The archive endpoint charges the same one request per city whether the
         range is a day or a year, so a five-month backfill is 24 API calls and
         a single Delta write rather than one of each per date.
 
-        Idempotent: dates already in Bronze are left alone.
+        Idempotent: dates already in Bronze are left alone. `rebuild` refetches
+        the range and replaces it instead, which is the only way to correct a
+        range once written, since a partition marked present is skipped from
+        then on. Two things need it: ERA5 revises its preliminary values to
+        final within about three months, and a range that lost a city to a
+        timeout has a hole no ordinary re-run will fill.
         """
-        existing = self._existing_partition_dates()
         wanted = [
             date_from + timedelta(days=offset)
             for offset in range((date_to - date_from).days + 1)
         ]
-        missing = [d for d in wanted if d.isoformat() not in existing]
+        missing = (
+            wanted
+            if rebuild
+            else [
+                d
+                for d in wanted
+                if d.isoformat() not in self._existing_partition_dates()
+            ]
+        )
 
         if not missing:
             logger.info(
@@ -102,8 +127,8 @@ class WeatherIngestor(BronzeIngestor):
             return
 
         logger.info(
-            f"[{self.source_name}] Range ingest {date_from} → {date_to}: "
-            f"{len(missing)} date(s) to fetch, "
+            f"[{self.source_name}] Range {'rebuild' if rebuild else 'ingest'} "
+            f"{date_from} → {date_to}: {len(missing)} date(s) to fetch, "
             f"{len(wanted) - len(missing)} already present"
         )
 
@@ -119,13 +144,60 @@ class WeatherIngestor(BronzeIngestor):
             )
             return
 
-        self._write(df)
+        # All twelve cities or none. A partial write still marks every partition
+        # in the range present, so the missing city is skipped from then on and
+        # the gap becomes permanent. Failing here costs a re-run, which is the
+        # cheaper of the two: the range is 24 free API calls.
+        fetched = set(df["station_id"])
+        expected = {city[0] for city in MEDITERRANEAN_CITIES}
+        if fetched != expected:
+            raise RuntimeError(
+                f"[{self.source_name}] Range ingest incomplete — "
+                f"{len(fetched)} of {len(expected)} cities returned data, "
+                f"missing {sorted(expected - fetched)}. Nothing written; re-run."
+            )
+
+        if rebuild:
+            self._replace(df, min(missing), max(missing))
+        else:
+            self._write(df)
+
         elapsed = time.monotonic() - t0
         self._push_metrics(len(df), elapsed)
         logger.success(
-            f"[{self.source_name}] Range ingest complete — {len(df)} rows across "
+            f"[{self.source_name}] Range {'rebuild' if rebuild else 'ingest'} "
+            f"complete — {len(df)} rows across "
             f"{df['partition_date'].nunique()} date(s) in {elapsed:.1f}s"
         )
+
+    def _replace(self, df: pd.DataFrame, start: date, end: date) -> None:
+        """Overwrite exactly the requested date range, leaving the rest alone.
+
+        replaceWhere rather than a whole-table overwrite: a rebuild of one
+        month must not take the other months with it. The replaced version
+        stays in the Delta log, so a bad rebuild is recoverable by time travel.
+        """
+        write_deltalake(
+            self.table_path,
+            df,
+            mode="overwrite",
+            predicate=(
+                f"partition_date >= '{start.isoformat()}' "
+                f"AND partition_date <= '{end.isoformat()}'"
+            ),
+            partition_by=["partition_date"],
+            storage_options=self.storage.options,
+            schema_mode="merge",
+            engine="rust",
+        )
+        try:
+            DeltaTable(
+                self.table_path, storage_options=self.storage.options
+            ).create_checkpoint()
+        except Exception as exc:
+            logger.warning(
+                f"[{self.source_name}] Delta checkpoint failed (non-fatal): {exc}"
+            )
 
     # ── Fetch helpers ─────────────────────────────────────────────────────────
 
@@ -198,7 +270,7 @@ class WeatherIngestor(BronzeIngestor):
                 "end_date": end.isoformat(),
                 "timezone": "UTC",
             },
-            timeout=_REQUEST_TIMEOUT,
+            timeout=_timeout(start, end),
         )
         resp.raise_for_status()
 
@@ -227,7 +299,7 @@ class WeatherIngestor(BronzeIngestor):
                 "end_date": end.isoformat(),
                 "timezone": "UTC",
             },
-            timeout=_REQUEST_TIMEOUT,
+            timeout=_timeout(start, end),
         )
         resp.raise_for_status()
 
@@ -258,9 +330,9 @@ def run(target_date: date | None = None) -> None:
     _ingestor().run(target_date)
 
 
-def run_range(date_from: date, date_to: date) -> None:
+def run_range(date_from: date, date_to: date, rebuild: bool = False) -> None:
     """Backfill; fetches the whole range in one pass per city."""
-    _ingestor().run_range(date_from, date_to)
+    _ingestor().run_range(date_from, date_to, rebuild)
 
 
 if __name__ == "__main__":
