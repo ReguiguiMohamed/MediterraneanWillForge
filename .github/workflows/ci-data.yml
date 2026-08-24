@@ -182,6 +182,14 @@ jobs:
           PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
         run: python -c "from data.ingestion.silver.transformer import run; run()"
 
+      - name: Run Silver weather transformer (Bronze → Silver)
+        env:
+          MINIO_ENDPOINT:              http://localhost:9000
+          MINIO_ACCESS_KEY:            minioadmin
+          MINIO_SECRET_KEY:            minioadmin
+          PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
+        run: python -c "from data.ingestion.silver.weather import run; run()"
+
       - name: Inspect MinIO silver layout
         # Shows exact file paths — confirms Silver data exists and glob depth is correct.
         run: |

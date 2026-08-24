@@ -53,6 +53,26 @@ GOLD_TABLE_CONTRACTS = (
         ),
     ),
     GoldTableContract(
+        name="daily_country_weather",
+        required_columns=frozenset(
+            {
+                "partition_date",
+                "country_code",
+                "stations",
+                "temp_max_c",
+                "temp_mean_c",
+                "temp_min_c",
+                "condition",
+                "wind_level",
+                "dust_level",
+                "heat_alert",
+                "heat_streak_days",
+                "cold_alert",
+                "cold_streak_days",
+            }
+        ),
+    ),
+    GoldTableContract(
         name="anomaly_alerts",
         required_columns=frozenset(
             {
@@ -95,6 +115,54 @@ def validate_gold_frame(
         errors.extend(_validate_wildfire_risk(frame, prefix))
     elif contract.name == "anomaly_alerts":
         errors.extend(_validate_anomaly_alerts(frame, prefix))
+    elif contract.name == "daily_country_weather":
+        errors.extend(_validate_country_weather(frame, prefix))
+
+    return errors
+
+
+HEAT_ALERT_LEVELS = {"none", "heat_advisory", "heatwave", "extreme_heatwave"}
+COLD_ALERT_LEVELS = {"none", "cold_advisory", "cold_wave", "severe_cold_wave"}
+
+# Wider than the Mediterranean ever gets. This catches a unit swap or a decimal
+# slip from upstream, not a warm afternoon.
+_PLAUSIBLE_TEMP_C = (-60.0, 60.0)
+
+
+def _validate_country_weather(frame: pd.DataFrame, prefix: str) -> list[str]:
+    errors = []
+
+    low, high = _PLAUSIBLE_TEMP_C
+    for column in ("temp_max_c", "temp_mean_c", "temp_min_c"):
+        outside = frame[column].notna() & (
+            (frame[column] < low) | (frame[column] > high)
+        )
+        if outside.any():
+            errors.append(
+                f"{prefix}: {int(outside.sum())} {column} values outside "
+                f"[{low}, {high}] C"
+            )
+
+    inverted = (
+        frame["temp_max_c"].notna()
+        & frame["temp_min_c"].notna()
+        & (frame["temp_max_c"] < frame["temp_min_c"])
+    )
+    if inverted.any():
+        errors.append(f"{prefix}: {int(inverted.sum())} rows with a low above the high")
+
+    for column, levels in (
+        ("heat_alert", HEAT_ALERT_LEVELS),
+        ("cold_alert", COLD_ALERT_LEVELS),
+    ):
+        unknown = set(frame[column].dropna().unique()) - levels
+        if unknown:
+            errors.append(f"{prefix}: unexpected {column} values {sorted(unknown)}")
+
+    for column in ("heat_streak_days", "cold_streak_days"):
+        negative = frame[column].notna() & (frame[column] < 0)
+        if negative.any():
+            errors.append(f"{prefix}: {int(negative.sum())} negative {column} values")
 
     return errors
 

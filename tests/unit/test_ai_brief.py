@@ -149,6 +149,65 @@ def test_country_briefings_parses_structured_output():
     assert "JSON" in ai_brief._BRIEFING_SYSTEM
 
 
+def _weather():
+    return pd.DataFrame(
+        {
+            "partition_date": ["2026-08-19", "2026-08-19"],
+            "country_code": ["GR", "TN"],
+            "temp_max_c": [38.1, 41.9],
+            "temp_min_c": [27.2, 27.2],
+            "temp_mean_c": [32.0, 34.1],
+            "condition": ["clear", "cloudy"],
+            "wind_level": ["breezy", "gale"],
+            "dust": [4.0, None],
+            "dust_level": ["none", "unknown"],
+            "heat_alert": ["heat_advisory", "extreme_heatwave"],
+            "heat_streak_days": [1, 4],
+            "cold_alert": ["none", "none"],
+            "cold_streak_days": [0, 0],
+        }
+    )
+
+
+def test_country_briefings_send_the_weather_with_the_pollutants():
+    payload = {"briefings": [{"country_code": "GR", "briefing": "Hot and clear."}]}
+    client = _Client(_interaction(json.dumps(payload)))
+
+    ai_brief.country_briefings(_summary(), client, _weather())
+
+    sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
+    greece = next(r for r in sent if r["country_code"] == "GR")
+    assert greece["temp_max_c"] == 38.1
+    assert greece["heat_alert"] == "heat_advisory"
+    assert greece["mean_pm2_5"] == 13.0
+    # A null field is left out rather than sent as a null to be described.
+    tunisia = next(r for r in sent if r["country_code"] == "TN")
+    assert "dust" not in tunisia
+    assert tunisia["heat_alert"] == "extreme_heatwave"
+
+
+def test_briefings_still_run_when_there_is_no_weather():
+    payload = {"briefings": [{"country_code": "GR", "briefing": "PM2.5 was 13.0."}]}
+    client = _Client(_interaction(json.dumps(payload)))
+
+    _, out = ai_brief.country_briefings(_summary(), client, None)
+
+    sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
+    assert all("temp_max_c" not in row for row in sent)
+    assert [b["country_code"] for b in out] == ["GR"]
+
+
+def test_fact_check_is_given_the_weather_over_the_station():
+    client = _Client(_interaction("Real and explained by the heat."))
+
+    ai_brief.fact_check_anomaly(
+        ANOMALY, STATS, client, ai_brief.weather_by_country(_weather())["GR"]
+    )
+
+    assert "temp_max_c 38.1" in client.calls[0]["input"]
+    assert "heat_alert heat_advisory" in client.calls[0]["input"]
+
+
 def test_country_briefings_returns_empty_when_no_model_answers():
     assert ai_brief.country_briefings(_summary(), _Client(_interaction(""))) == (
         None,

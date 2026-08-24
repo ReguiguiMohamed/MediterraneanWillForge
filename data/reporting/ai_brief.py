@@ -8,13 +8,15 @@ takes the first that answers, so a spent free-tier quota costs a better model
 rather than the whole section:
 
   1. A fact-check of the day's top anomaly. The model is given the flagged
-     reading and that day's distribution, and searches Google for corroborating
-     real-world conditions (wildfire, dust intrusion, heatwave, traffic event).
-     It is told to report an absence of evidence as an absence of evidence — an
-     uncorroborated anomaly is a normal outcome, not a prompt to invent a cause.
+     reading, that day's distribution, and the weather over that country, then
+     searches Google for corroborating real-world conditions (wildfire, dust
+     intrusion, heatwave, traffic event). It is told to report an absence of
+     evidence as an absence of evidence — an uncorroborated anomaly is a normal
+     outcome, not a prompt to invent a cause.
 
   2. A one-to-three sentence briefing per country, grounded in that country's
-     own Gold aggregates for the day.
+     own Gold aggregates for the day: pollutants from daily_country_summary,
+     temperature, conditions and heat alerts from daily_country_weather.
 
 Why Gemini: it is the only provider whose free tier includes real search
 grounding. Flash text tokens are free, and 2.5 Flash allows 500 grounded
@@ -81,15 +83,24 @@ Rules:
   from "this reading is real and explained by X" from "real but unexplained".
 - 3 sentences maximum. Lead with the verdict. Include the relevant numbers."""
 
-_BRIEFING_SYSTEM = """You write daily air-quality briefings for a public monitoring dashboard.
+_BRIEFING_SYSTEM = """You write daily weather and air-quality briefings for a public monitoring dashboard.
 
-For each country you are given that day's aggregated measurements. Write one to
-three sentences per country.
+For each country you are given that day's aggregated measurements, and usually
+that day's weather. Write one to three sentences per country.
 
 Rules:
 - Cite the actual numbers you are given. Never state a figure you were not given.
 - Compare against WHO 2021 24-hour guidelines where relevant: PM2.5 15, PM10 45,
   NO2 25, O3 100 ug/m3.
+- Say what the weather did. Give the day's high in Celsius, and name any heat or
+  cold alert, strong wind, rain or dust the numbers show. Write it the way a
+  person would, not as a raw label: "hot and still", "a gale off the sea".
+- heat_alert reads: heat_advisory means one or two days above that station's own
+  recent normal; heatwave means three or more in a row; extreme_heatwave means
+  three or more with a high at or above 40 C. cold_alert mirrors it. Do not call
+  a day a heatwave when the alert does not.
+- Weather figures may be missing for a country. Then write about air quality
+  alone and do not guess at the weather.
 - Plain, factual, non-alarmist. No advice, no speculation about causes you cannot
   see in the data.
 - If a country's station count is low, say the reading is based on few stations.
@@ -219,8 +230,22 @@ def _citations(interaction) -> list[dict]:
     return [{"title": title, "url": url} for url, title in seen.items()]
 
 
-def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
+def fact_check_anomaly(
+    anomaly: dict,
+    day_stats: dict,
+    client,
+    weather: dict | None = None,
+) -> dict | None:
     """Fact-check the day's top anomaly against real-world conditions."""
+    # The pipeline now knows what the weather was doing over that station, so
+    # the model can weigh a heatwave or a dust intrusion against the reading
+    # instead of searching blind for one.
+    weather_block = ""
+    if weather:
+        weather_block = "That country's weather that day:\n" + "".join(
+            f"  {field} {value}\n" for field, value in weather.items()
+        )
+
     prompt = (
         f"Date: {anomaly['partition_date']}\n"
         f"Station: {anomaly['station_name']} ({anomaly['country_code']}), "
@@ -236,6 +261,7 @@ def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
         f"  Ozone median {day_stats['ozone']}\n"
         f"  NO2   median {day_stats['nitrogen_dioxide']}\n"
         f"  Stations reporting: {day_stats['stations']}\n\n"
+        f"{weather_block}\n"
         "Is this reading plausible, and does anything explain it?"
     )
 
@@ -265,8 +291,53 @@ def fact_check_anomaly(anomaly: dict, day_stats: dict, client) -> dict | None:
     }
 
 
-def country_briefings(latest: pd.DataFrame, client) -> tuple[str | None, list[dict]]:
+# Weather columns worth a sentence, in the order the model reads them. The
+# baselines and station counts behind the alerts stay in Gold: the model needs
+# the verdict and the temperature, not the arithmetic that produced them.
+_WEATHER_FIELDS = (
+    "temp_max_c",
+    "temp_min_c",
+    "temp_mean_c",
+    "apparent_temp_max_c",
+    "condition",
+    "wind_level",
+    "wind_gust_max_kmh",
+    "precipitation_mm",
+    "humidity_pct",
+    "dust",
+    "dust_level",
+    "heat_alert",
+    "heat_streak_days",
+    "cold_alert",
+    "cold_streak_days",
+)
+
+
+def weather_by_country(weather: pd.DataFrame | None) -> dict[str, dict]:
+    """That day's weather per country, keyed for lookup by country code."""
+    if weather is None or weather.empty:
+        return {}
+
+    lookup: dict[str, dict] = {}
+    for record in weather.to_dict("records"):
+        entry = {}
+        for field in _WEATHER_FIELDS:
+            value = record.get(field)
+            if value is None or (not isinstance(value, str) and pd.isna(value)):
+                continue
+            entry[field] = value if isinstance(value, str) else _round(value)
+        if entry:
+            lookup[record["country_code"]] = entry
+    return lookup
+
+
+def country_briefings(
+    latest: pd.DataFrame,
+    client,
+    weather: pd.DataFrame | None = None,
+) -> tuple[str | None, list[dict]]:
     """One to three sentences per country, and the model that wrote them."""
+    conditions = weather_by_country(weather)
     rows = []
     for country, grp in latest.groupby("country_code"):
         rows.append(
@@ -279,11 +350,15 @@ def country_briefings(latest: pd.DataFrame, client) -> tuple[str | None, list[di
                 "mean_no2": _round(grp["mean_no2"].mean()),
                 "mean_o3": _round(grp["mean_o3"].mean()),
                 "who_pm25_exceed_pct": _round(grp["who_pm25_exceed_pct"].mean(), 3),
+                **conditions.get(country, {}),
             }
         )
 
     if not rows:
         return None, []
+
+    with_weather = sum(1 for row in rows if "temp_max_c" in row)
+    logger.info(f"Weather attached to {with_weather} of {len(rows)} countries.")
 
     model, briefings = _first_working(
         client,
@@ -291,9 +366,11 @@ def country_briefings(latest: pd.DataFrame, client) -> tuple[str | None, list[di
         lambda interaction: _parse_briefings(interaction.output_text or ""),
         system_instruction=_BRIEFING_SYSTEM,
         input=(
-            "Write a briefing for each country below. Values are ug/m3 daily "
-            "means; who_pm25_exceed_pct is the fraction of station-days above "
-            "the WHO PM2.5 guideline.\n\n" + json.dumps(rows, indent=2)
+            "Write a briefing for each country below. Pollutant values are "
+            "ug/m3 daily means; who_pm25_exceed_pct is the fraction of "
+            "station-days above the WHO PM2.5 guideline. Temperatures are "
+            "Celsius, wind gusts km/h, precipitation mm, dust ug/m3.\n\n"
+            + json.dumps(rows, indent=2)
         ),
         response_format={
             "type": "text",
@@ -322,6 +399,18 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
     logger.info(
         f"AI brief for {latest_date}: {latest['country_code'].nunique()} countries."
     )
+
+    # Weather is a whole Gold table younger than the rest, and a day where it
+    # failed to land should still get an air-quality brief. Read it defensively
+    # and let an absence be an absence.
+    try:
+        weather = filter_report_countries(
+            read_delta(f"s3://{gold}/daily_country_weather")
+        )
+        weather = weather[weather["partition_date"] == latest_date]
+    except Exception as exc:
+        logger.warning(f"Gold weather unavailable for the brief: {exc}")
+        weather = None
 
     brief: dict = {
         "generated_at": datetime.now(tz=timezone.utc).isoformat(),
@@ -357,12 +446,13 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
                 },
                 stats,
                 client,
+                weather_by_country(weather).get(top["country_code"]),
             )
     except Exception as exc:
         logger.warning(f"Anomaly fact-check failed (non-fatal): {exc}")
 
     try:
-        model, brief["briefings"] = country_briefings(latest, client)
+        model, brief["briefings"] = country_briefings(latest, client, weather)
         # The report caption names the model that actually answered, which the
         # ladder makes a runtime fact rather than a constant.
         brief["model"] = model or (brief["fact_check"] or {}).get("model")

@@ -62,6 +62,38 @@ def test_anomaly_contract_rejects_waqi_rows():
     ]
 
 
+def test_weather_contract_rejects_an_impossible_day():
+    frame = pd.DataFrame(
+        {
+            "partition_date": ["2026-06-05"],
+            "country_code": ["TN"],
+            "stations": [1],
+            "temp_max_c": [12.0],
+            "temp_mean_c": [20.0],
+            "temp_min_c": [28.0],
+            "condition": ["clear"],
+            "wind_level": ["breezy"],
+            "dust_level": ["none"],
+            "heat_alert": ["scorching"],
+            "heat_streak_days": [-1],
+            "cold_alert": ["none"],
+            "cold_streak_days": [0],
+        }
+    )
+
+    errors = validate_gold_frame(
+        _contract("daily_country_weather"),
+        frame,
+        target_dates=["2026-06-05"],
+    )
+
+    assert errors == [
+        "gold/daily_country_weather: 1 rows with a low above the high",
+        "gold/daily_country_weather: unexpected heat_alert values ['scorching']",
+        "gold/daily_country_weather: 1 negative heat_streak_days values",
+    ]
+
+
 def test_wildfire_contract_rejects_invalid_domains():
     frame = pd.DataFrame(
         {

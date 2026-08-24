@@ -160,6 +160,24 @@ class BronzeIngestor(ABC):
         except TableNotFoundError:
             return False
 
+    def _existing_partition_dates(self) -> set[str]:
+        """Every partition_date already in the table, from one Delta log read.
+
+        A range ingest that called _partition_exists() per date would open the
+        log once per date; against the B2 free tier a five-month backfill would
+        spend a hundred and fifty Class B transactions before fetching a row.
+        """
+        try:
+            dt = DeltaTable(self.table_path, storage_options=self.storage.options)
+        except TableNotFoundError:
+            return set()
+        return {
+            segment.split("=", 1)[1]
+            for file in dt.files()
+            for segment in file.replace("\\", "/").split("/")
+            if segment.startswith("partition_date=")
+        }
+
     def _write(self, df: pd.DataFrame) -> None:
         """Append df to the Delta table, merging any new columns automatically."""
         write_deltalake(

@@ -231,11 +231,43 @@ jobs:
           "
           done
 
+      # Open-Meteo's ERA5 archive serves a date range for the same one request
+      # per city that a single day costs, so a backfill of months is 24 calls.
+      - name: Bronze — Open-Meteo weather (temperature, wind, rain, dust)
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+        run: |
+          python - <<'EOF'
+          import os
+          from datetime import date
+          from data.ingestion.bronze.weather_ingestor import run, run_range
+
+          start = os.environ.get("BACKFILL_START", "").strip()
+          end_s = os.environ.get("BACKFILL_END", "").strip()
+          td    = os.environ.get("TARGET_DATE", "").strip()
+
+          if start and end_s:
+              print(f"=== weather: range {start} -> {end_s} ===")
+              run_range(date.fromisoformat(start), date.fromisoformat(end_s))
+          elif td:
+              print(f"=== weather: {td} ===")
+              run(date.fromisoformat(td))
+          else:
+              run()
+          EOF
+
       - name: Silver — Transform (Bronze → Silver)
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
         run: python -c "from data.ingestion.silver.transformer import run; run()"
+
+      - name: Silver — Weather (Bronze → Silver)
+        env:
+          MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
+          MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
+        run: python -c "from data.ingestion.silver.weather import run; run()"
 
       - name: Quality — Validate requested Bronze and Silver partitions
         env:

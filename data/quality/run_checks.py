@@ -52,6 +52,22 @@ except ImportError:  # Great Expectations 0.18 compatibility.
 VALID_SOURCES = {"openmeteo", "openaq", "waqi"}
 REQUIRED_BRONZE_SOURCES = {"openmeteo"}
 
+# The weather source is checked separately: it has its own table names and its
+# own columns, and folding it into VALID_SOURCES would send the air-quality
+# loop looking for bronze/openmeteo_weather/air_quality.
+WEATHER_SOURCE = "openmeteo_weather"
+WEATHER_COLUMNS = ["temp_max_c", "temp_min_c", "temp_mean_c"]
+VALID_CONDITIONS = {
+    "clear",
+    "cloudy",
+    "fog",
+    "drizzle",
+    "rain",
+    "snow",
+    "thunderstorm",
+    "unknown",
+}
+
 # ── Storage config ─────────────────────────────────────────────────────────────
 
 
@@ -570,6 +586,71 @@ def run_silver_checks(df: pd.DataFrame) -> list[CheckResult]:
     return results
 
 
+def run_weather_checks(df: pd.DataFrame, layer: str, table: str) -> list[CheckResult]:
+    """Schema and range checks for the weather tables, Bronze or Silver.
+
+    Temperature is a hard fail on nulls, not a warning. A silently empty
+    temperature column would leave the heatwave detector with nothing to
+    compare and the daily brief describing weather it never received.
+    """
+    results: list[CheckResult] = []
+    validator = _gx_validator(df, table.replace("/", "_"))
+
+    results.append(check_row_count(df, layer, table, validator=validator))
+    results.extend(
+        check_required_columns(
+            df,
+            layer,
+            table,
+            required=["station_id", "country_code", "date", "partition_date"]
+            + WEATHER_COLUMNS,
+            validator=validator,
+        )
+    )
+    for col in WEATHER_COLUMNS:
+        results.append(
+            check_null_rate(
+                df,
+                layer,
+                table,
+                col,
+                warn_threshold=0.10,
+                fail_threshold=0.30,
+                validator=validator,
+            )
+        )
+        results.append(
+            check_value_range(
+                df, layer, table, col, min_val=-60, max_val=60, validator=validator
+            )
+        )
+
+    for col, (low, high) in (
+        ("precipitation_mm", (0, 1_000)),
+        ("wind_gust_max_kmh", (0, 500)),
+        ("humidity_pct", (0, 100)),
+        ("dust", (0, 10_000)),
+    ):
+        results.append(
+            check_value_range(
+                df, layer, table, col, min_val=low, max_val=high, validator=validator
+            )
+        )
+
+    if layer == "silver":
+        results.append(
+            check_valid_values(
+                df,
+                layer,
+                table,
+                "condition",
+                valid_set=VALID_CONDITIONS,
+                validator=validator,
+            )
+        )
+    return results
+
+
 # ── Table loader ───────────────────────────────────────────────────────────────
 
 
@@ -699,6 +780,37 @@ def run() -> int:
     else:
         logger.info(f"[silver] Loaded {len(df)} rows.")
         all_results.extend(run_silver_checks(df))
+
+    # ── Weather, Bronze and Silver ────────────────────────────────────────────
+    # Held to the same standard as the Open-Meteo air-quality source: it comes
+    # from the same provider, so an outage that loses one loses both, and a
+    # quiet pass would ship a report whose temperatures stopped moving.
+    for layer, path, table in (
+        (
+            "bronze",
+            f"s3://{bronze_bucket}/{WEATHER_SOURCE}/weather",
+            f"bronze/{WEATHER_SOURCE}/weather",
+        ),
+        ("silver", f"s3://{silver_bucket}/weather", "silver/weather"),
+    ):
+        df = load_recent_partition(
+            path,
+            storage_opts,
+            lookback,
+            partition_dates=partition_dates,
+        )
+        if df.empty:
+            result = missing_data_result(
+                layer,
+                table,
+                required=True,
+                partition_dates=partition_dates,
+            )
+            all_results.append(result)
+            logger.error(f"[{table}] {result.detail}")
+        else:
+            logger.info(f"[{table}] Loaded {len(df)} rows.")
+            all_results.extend(run_weather_checks(df, layer, table))
 
     # ── Report ────────────────────────────────────────────────────────────────
     _push_results(all_results, pushgateway)

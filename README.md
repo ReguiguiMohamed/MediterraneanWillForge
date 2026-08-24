@@ -5,8 +5,9 @@
 [![Scheduled pipeline](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/pipeline-run.yml/badge.svg)](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/pipeline-run.yml)
 [![Latest release](https://img.shields.io/github/v/release/ReguiguiMohamed/MediterraneanWillForge)](https://github.com/ReguiguiMohamed/MediterraneanWillForge/releases)
 
-An air-quality lakehouse for the Mediterranean and North Africa, running every
-day on real data from Open-Meteo, OpenAQ, and WAQI. Nothing here is synthetic.
+An air-quality and weather lakehouse for the Mediterranean and North Africa,
+running every day on real data from Open-Meteo, OpenAQ, and WAQI. Nothing here
+is synthetic.
 
 A GitHub Actions cron builds Bronze, Silver, and Gold Delta tables on Backblaze
 B2, runs quality checks and anomaly detection, then publishes a fresh report to
@@ -19,6 +20,7 @@ GitHub Pages.
 | Source | Input | Bronze path |
 |---|---|---|
 | Open-Meteo | CAMS daily PM2.5, PM10, NO2, O3 for 12 city grid points | `s3://bronze/openmeteo/air_quality` |
+| Open-Meteo | ERA5 daily temperature, wind, rain, humidity and dust for the same 12 points | `s3://bronze/openmeteo_weather/weather` |
 | OpenAQ v3 | Daily station aggregates across nine countries | `s3://bronze/openaq/air_quality` |
 | WAQI | Current station readings for 15 city searches | `s3://bronze/waqi/air_quality` |
 
@@ -36,17 +38,52 @@ because the station has no PM2.5 sensor at all. Those are filled from the CAMS
 model at the station's own coordinates, and `pm2_5_source` records which is
 which: `ground_sensor`, `model_estimated`, or `model_grid`.
 
-Gold holds `daily_country_summary`, `wildfire_risk_index`, and `anomaly_alerts`.
+Weather lands separately in `s3://silver/weather`, one row per city per day:
+
+```text
+station_id, station_name, country_code, latitude, longitude, date,
+temp_max_c, temp_min_c, temp_mean_c, apparent_temp_max_c, precipitation_mm,
+wind_speed_max_kmh, wind_gust_max_kmh, humidity_pct, weather_code, dust,
+condition, wind_level, dust_level, source, silver_ts, partition_date
+```
+
+`condition` comes from the WMO present-weather code (clear, cloudy, fog,
+drizzle, rain, snow, thunderstorm). `wind_level` bands the day's strongest gust
+on the Beaufort scale, and `dust_level` bands the CAMS dust concentration, which
+is what a Saharan intrusion looks like in the data.
+
+Gold holds `daily_country_summary`, `wildfire_risk_index`, `anomaly_alerts`, and
+`daily_country_weather`.
 
 WAQI reports IAQI index values rather than concentrations, so it feeds coverage
 and WHO reporting but is kept out of anomaly detection.
 
+## Heat and cold alerts
+
+`daily_country_weather` carries a `heat_alert` and a `cold_alert` per country
+per day. A day counts as unusually hot only if it clears two bars at once: 30 C
+in absolute terms, and the 90th percentile of that station's own previous 30
+days. The relative bar is what stops an ordinary Mediterranean August reading as
+one long heatwave. The absolute bar is what stops a mild April day qualifying
+merely because the fortnight before it was milder still.
+
+One or two such days in a row is a `heat_advisory`, three or more a `heatwave`,
+and a heatwave whose high reaches 40 C an `extreme_heatwave`. Cold alerts mirror
+the shape against the 10th percentile and 5 C, with `severe_cold_wave` at or
+below freezing. A station's first ten days get no verdict, because there is
+nothing yet to compare them against.
+
+The detection runs in Gold rather than Silver on purpose. Silver only ever sees
+the partitions it has not processed yet, and whether a day is a heatwave is a
+statement about the days around it.
+
 ## Architecture
 
 ```text
-Open-Meteo ---\
-OpenAQ --------+--> Bronze --> Silver --> Gold --> report + Pages
-WAQI ---------/
+Open-Meteo air quality ---\
+Open-Meteo ERA5 weather ---+--> Bronze --> Silver --> Gold --> report + Pages
+OpenAQ --------------------+
+WAQI ----------------------/
                          |
                          +--> quality checks
                          +--> dbt/DuckDB in MinIO CI
@@ -75,6 +112,9 @@ the git history. The notebook that produces them is
 **WHO guideline exceedance**
 ![WHO exceedance](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/who_exceedance.png)
 
+**Daily highs and heatwave days per country**
+![Temperature and heat alerts](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/temperature_heat.png)
+
 **Top anomaly of the day**, plotted against that day's spread across every
 station, so you can see why the model flagged it.
 ![Top anomaly](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/top_anomaly.png)
@@ -95,7 +135,8 @@ Two short generated sections in the report, both from that run's Gold layer:
   unexplained. It is told to report finding nothing as finding nothing, since an
   uncorroborated anomaly is the normal case. External claims carry source links.
 - **Country briefings.** One to three sentences per country, using only that
-  country's own numbers for the day, against WHO 2021 guidelines.
+  country's own numbers for the day: pollutants against WHO 2021 guidelines,
+  plus the day's high, the conditions, and any heat or cold alert.
 
 Both are labelled as generated text in the report. Every figure comes from the
 pipeline, not the model.
@@ -170,6 +211,9 @@ tests/               unit and MinIO integration tests
 
 - OpenAQ coverage is sparse and rate-limited, so zero-row days happen.
 - WAQI has no free historical endpoint and reports IAQI, not concentrations.
+- Weather covers the 12 city grid points, not every OpenAQ or WAQI station, so a
+  country's alert describes its anchor cities. Tornadoes are not in the feed;
+  the closest signal is a storm-force gust.
 - Gold rebuilds from all of Silver daily, so read cost grows with history. The
   B2 free tier will eventually need incremental Gold or coarser partitioning.
 - dbt runs against MinIO in CI only, never in the scheduled B2 pipeline.

@@ -13,6 +13,7 @@ from deltalake import DeltaTable
 from data.ingestion.bronze.copernicus_ingestor import CopernicusIngestor
 from data.ingestion.bronze.openaq_ingestor import OpenAQIngestor
 from data.ingestion.bronze.waqi_ingestor import WAQIIngestor
+from data.ingestion.bronze.weather_ingestor import WeatherIngestor
 from data.storage import delta_storage_options
 
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
@@ -67,11 +68,46 @@ def _source_frame(source: str, target_date: date) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _weather_frame(target_date: date) -> pd.DataFrame:
+    """Bronze weather rows for the same stations the air-quality sources use."""
+    country_codes = ["TN", "DZ", "MA", "EG", "TR", "GR"]
+    rows = [
+        {
+            "station_id": f"openmeteo-station-{index}",
+            "station_name": f"Weather Station {index}",
+            "country_code": country_codes[index],
+            "latitude": 30.0 + index,
+            "longitude": 5.0 + index,
+            "date": target_date.isoformat(),
+            "temp_max_c": 28.0 + index,
+            "temp_min_c": 16.0 + index,
+            "temp_mean_c": 22.0 + index,
+            "apparent_temp_max_c": 31.0 + index,
+            "precipitation_mm": 0.0,
+            "wind_speed_max_kmh": 12.0 + index,
+            "wind_gust_max_kmh": 30.0 + index,
+            "humidity_pct": 55.0 + index,
+            "weather_code": 1,
+            "dust": 5.0 * index,
+            "source": "openmeteo_weather",
+            "ingestion_ts": pd.Timestamp.now(tz=timezone.utc).isoformat(),
+            "partition_date": target_date.isoformat(),
+        }
+        for index in range(6)
+    ]
+    return pd.DataFrame(rows)
+
+
 def _seed_bronze(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         CopernicusIngestor,
         "fetch",
         lambda self, target_date: _source_frame("openmeteo", target_date),
+    )
+    monkeypatch.setattr(
+        WeatherIngestor,
+        "fetch",
+        lambda self, target_date: _weather_frame(target_date),
     )
     monkeypatch.setattr(
         OpenAQIngestor,
@@ -87,11 +123,13 @@ def _seed_bronze(monkeypatch: pytest.MonkeyPatch) -> None:
     from data.ingestion.bronze.copernicus_ingestor import run as run_openmeteo
     from data.ingestion.bronze.openaq_ingestor import run as run_openaq
     from data.ingestion.bronze.waqi_ingestor import run as run_waqi
+    from data.ingestion.bronze.weather_ingestor import run as run_weather
 
     for target_date in TEST_DATES:
         run_openmeteo(target_date)
         run_openaq(target_date)
         run_waqi(target_date)
+        run_weather(target_date)
 
 
 @pytest.mark.parametrize("source", ["openmeteo", "openaq", "waqi"])
@@ -115,6 +153,22 @@ def test_bronze_sources_write_partitioned_delta_tables(monkeypatch, source):
         "nitrogen_dioxide",
         "ozone",
     }.issubset(frame.columns)
+
+
+def test_bronze_weather_writes_partitioned_delta_table(monkeypatch):
+    _seed_bronze(monkeypatch)
+
+    frame = DeltaTable(
+        "s3://bronze/openmeteo_weather/weather",
+        storage_options=_STORAGE_OPTS,
+    ).to_pandas()
+
+    assert set(frame["partition_date"].astype(str)) == {
+        target_date.isoformat() for target_date in TEST_DATES
+    }
+    assert {"temp_max_c", "temp_min_c", "wind_gust_max_kmh", "dust"}.issubset(
+        frame.columns
+    )
 
 
 def test_bronze_writes_are_idempotent(monkeypatch):
