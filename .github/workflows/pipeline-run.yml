@@ -15,13 +15,6 @@ name: Pipeline — Full Run (Bronze → Silver → Gold)
 on:
   schedule:
     - cron: "0 6 * * *"
-    # One-off, 01:23 UTC on 2026-08-25. The first weather backfill lost Beirut
-    # to a request timeout and wrote the partial result anyway, which marks
-    # every partition in the range complete and leaves Lebanon permanently
-    # absent. This fires well after the B2 daily transaction cap resets at
-    # 00:00 UTC and rebuilds the range. Delete this entry and the repair step
-    # below once it has run.
-    - cron: "23 1 25 8 *"
   workflow_dispatch:
     inputs:
       target_date:
@@ -263,13 +256,6 @@ jobs:
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-          # Step-level so it wins outright, no reliance on env precedence. A
-          # schedule cannot carry inputs, so the one-off repair cron supplies
-          # the same three values a manual dispatch would; every other trigger
-          # falls through to the inputs. Remove with the cron entry above.
-          WEATHER_BACKFILL_START: ${{ github.event.schedule == '23 1 25 8 *' && '2026-03-31' || inputs.weather_backfill_start }}
-          WEATHER_BACKFILL_END: ${{ github.event.schedule == '23 1 25 8 *' && '2026-08-24' || inputs.weather_backfill_end }}
-          WEATHER_REBUILD: ${{ github.event.schedule == '23 1 25 8 *' || inputs.weather_rebuild }}
         run: |
           python - <<'EOF'
           import os
@@ -307,7 +293,6 @@ jobs:
         env:
           MINIO_ACCESS_KEY: ${{ secrets.B2_KEY_ID }}
           MINIO_SECRET_KEY: ${{ secrets.B2_APP_KEY }}
-          WEATHER_REBUILD: ${{ github.event.schedule == '23 1 25 8 *' || inputs.weather_rebuild }}
         run: |
           python -c "
           import os
