@@ -149,6 +149,12 @@ Two short generated sections in the report, both from that run's Gold layer:
 - **Country briefings.** One to three sentences per country, using only that
   country's own numbers for the day: pollutants against WHO 2021 guidelines,
   plus the day's high, the conditions, and any heat or cold alert.
+- **Heat note.** A paragraph on whichever country ran hottest that day, sitting
+  under the temperature charts: what heat at that level does to people, and
+  whether it arrived gradually or as a swing. Every figure in it, including the
+  sharpest day-to-day change and the spread across the last ten days, is
+  computed by the pipeline and handed over. Asking a model to spot a jump in a
+  list is asking it to do arithmetic it is not reliably good at.
 
 Both are labelled as generated text in the report. Every figure comes from the
 pipeline, not the model.
@@ -163,6 +169,10 @@ Free-tier quota is counted per model, and `gemini-3.7-flash` allows only 20
 requests a day, so a spent quota drops the section to `gemini-2.5-flash` and
 then `gemini-2.5-flash-lite` instead of dropping it from the report. The caption
 names whichever model actually wrote it.
+
+The heat note runs its ladder cheapest-first instead. It is one paragraph over a
+dozen figures that are already computed, which the smallest model handles, and
+starting at the bottom keeps it out of the 20-a-day quota the briefings need.
 
 To turn it on, get a key from [Google AI Studio](https://aistudio.google.com/apikey)
 (no card needed) and add it as a `GEMINI_API_KEY` repository secret under

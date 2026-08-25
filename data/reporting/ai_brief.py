@@ -3,9 +3,9 @@ data/reporting/ai_brief.py
 ──────────────────────────
 Narrative layer over the latest Gold day, written by Gemini.
 
-Two artefacts, one API call each, though each call walks a ladder of models and
-takes the first that answers, so a spent free-tier quota costs a better model
-rather than the whole section:
+Three artefacts, one API call each, though each call walks a ladder of models
+and takes the first that answers, so a spent free-tier quota costs a better
+model rather than the whole section:
 
   1. A fact-check of the day's top anomaly. The model is given the flagged
      reading, that day's distribution, and the weather over that country, then
@@ -18,14 +18,19 @@ rather than the whole section:
      own Gold aggregates for the day: pollutants from daily_country_summary,
      temperature, conditions and heat alerts from daily_country_weather.
 
+  3. A paragraph on whichever country was hottest today: what that heat does to
+     people, and whether it arrived gradually or as a swing. Every figure in it,
+     including the size of each swing, is computed here and handed over rather
+     than left to the model to read off a list.
+
 Why Gemini: it is the only provider whose free tier includes real search
 grounding. Flash text tokens are free, and 2.5 Flash allows 500 grounded
-requests a day free — this pipeline uses two calls a day. Costs nothing.
+requests a day free. This pipeline uses three calls a day and costs nothing.
 
-Both artefacts are best-effort. No API key, an API error, or a malformed
-response leaves the report without this section rather than failing the
-pipeline — this runs after the data is already safely in Gold, and no narrative
-is worth losing a run.
+All three are best-effort. No API key, an API error, an unreadable Gold layer,
+or a malformed response leaves the report without that section rather than
+failing the pipeline. This runs after the data is already safely in Gold, and
+no narrative is worth losing a run.
 
 Output: docs/ai_brief.json, gitignored and published to Pages with the report.
 """
@@ -64,6 +69,20 @@ from data.storage import read_delta
 # routinely spent by mid-morning, which is exactly what the ladder is for.
 BRIEFING_MODELS = ("gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite")
 SEARCH_MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite")
+
+# The heat note is the one ladder that runs cheapest-first rather than
+# best-first. It is a single paragraph over a dozen numbers that are already
+# computed, which the smallest model does perfectly well, and starting at the
+# bottom keeps it out of the 20-a-day free quota that gemini-3.7-flash rations
+# and the briefings actually need.
+SPOTLIGHT_MODELS = ("gemini-2.5-flash-lite", "gemini-2.5-flash")
+
+# Days of history behind the hottest country's note. Long enough to show a
+# swing building, short enough that the model is reading a handful of numbers.
+SPOTLIGHT_DAYS = 10
+
+_HEAT_ALERTS = {"heat_advisory", "heatwave", "extreme_heatwave"}
+_COLD_ALERTS = {"cold_advisory", "cold_wave", "severe_cold_wave"}
 
 _FACT_CHECK_SYSTEM = """You are auditing an automated air-quality anomaly detector.
 
@@ -109,6 +128,31 @@ Rules:
 
 Answer with bare JSON and nothing else, no markdown fence, no preamble:
 {"briefings": [{"country_code": "XX", "briefing": "..."}]}"""
+
+_HEAT_RISK_SYSTEM = """You write a short heat-risk note for a public weather and air-quality dashboard.
+
+You are given the recent daily temperatures for whichever country was hottest
+today, its heat and cold alerts, and the size of the swings between those days.
+
+Write one paragraph, three to five sentences.
+
+Rules:
+- Name the country and today's high in Celsius. Use only figures you were given.
+- Say what heat at that level does to people, in general and well-established
+  terms: who feels it first, what sustained heat costs a body, why a night that
+  stays warm matters as much as the afternoon. No diagnosis, no treatment, and
+  nothing addressed to an individual reader as advice.
+- Cover the swing as well as the level. A large jump between two days, a wide
+  spread across the window, or a flip between heat and cold alerts is worth
+  naming, because a body adapts to gradual change and not to a sudden one.
+- Alert levels mean: heat_advisory, one or two days above that station's own
+  recent normal; heatwave, three or more in a row; extreme_heatwave, three or
+  more with a high at or above 40 C. The cold alerts mirror them.
+- If there is no alert and no notable swing, say so plainly. The warmest country
+  on an ordinary day is an ordinary finding, not a story.
+- Plain and factual. No alarm, no reassurance, no instructions.
+
+Return the paragraph as plain text. No heading, no markdown, no preamble."""
 
 _BRIEFING_SCHEMA = {
     "type": "object",
@@ -339,6 +383,121 @@ def weather_by_country(weather: pd.DataFrame | None) -> dict[str, dict]:
     return lookup
 
 
+def temperature_profile(
+    history: pd.DataFrame,
+    country: str,
+    latest_date: str,
+    days: int = SPOTLIGHT_DAYS,
+) -> dict | None:
+    """One country's recent temperatures, and the swings worth naming.
+
+    The swings are measured here rather than left to the model. Asking it to
+    eyeball a jump from a list is asking it to do arithmetic it is not reliably
+    good at, and every figure in the note has to be one the pipeline computed.
+    """
+    rows = (
+        history[
+            (history["country_code"] == country)
+            & (history["partition_date"].astype(str) <= str(latest_date))
+        ]
+        .sort_values("partition_date")
+        .tail(days)
+    )
+    if rows.empty:
+        return None
+
+    highs = pd.to_numeric(rows["temp_max_c"], errors="coerce")
+    lows = pd.to_numeric(rows["temp_min_c"], errors="coerce")
+    latest = rows.iloc[-1]
+
+    alerts = set(rows.get("heat_alert", pd.Series(dtype=str)).dropna()) | set(
+        rows.get("cold_alert", pd.Series(dtype=str)).dropna()
+    )
+
+    profile = {
+        "country_code": country,
+        "date": str(latest["partition_date"]),
+        "days_of_history": int(len(rows)),
+        "high_c": _round(latest["temp_max_c"]),
+        "low_c": _round(latest["temp_min_c"]),
+        "day_night_range_c": _round(highs.iloc[-1] - lows.iloc[-1]),
+        "heat_alert": latest.get("heat_alert"),
+        "heat_streak_days": int(pd.to_numeric(latest.get("heat_streak_days")) or 0),
+        "cold_alert": latest.get("cold_alert"),
+        "condition": latest.get("condition"),
+        "window_highest_c": _round(highs.max()),
+        "window_lowest_c": _round(lows.min()),
+        "window_high_spread_c": _round(highs.max() - highs.min()),
+        # A window holding both kinds of alert is the hot-to-cold flip the
+        # dashboard most wants surfaced.
+        "swung_between_heat_and_cold": bool(
+            (alerts & _HEAT_ALERTS) and (alerts & _COLD_ALERTS)
+        ),
+        "days": [
+            {
+                "date": str(row["partition_date"]),
+                "high_c": _round(row["temp_max_c"]),
+                "low_c": _round(row["temp_min_c"]),
+                "heat_alert": row.get("heat_alert"),
+            }
+            for _, row in rows.iterrows()
+        ],
+    }
+
+    steps = highs.diff()
+    if steps.notna().any():
+        sharpest = steps.abs().idxmax()
+        profile["biggest_day_to_day_change_c"] = _round(steps.loc[sharpest])
+        profile["biggest_change_on"] = str(rows.loc[sharpest, "partition_date"])
+
+    return profile
+
+
+def heat_spotlight(
+    history: pd.DataFrame | None, client, latest_date: str
+) -> dict | None:
+    """A paragraph on the hottest country's heat risk and its swings."""
+    if history is None or history.empty:
+        return None
+
+    day = history[history["partition_date"].astype(str) == str(latest_date)]
+    highs = pd.to_numeric(day["temp_max_c"], errors="coerce") if not day.empty else None
+    if highs is None or not highs.notna().any():
+        logger.warning("No temperatures for the latest date — skipping the heat note.")
+        return None
+
+    country = day.loc[highs.idxmax(), "country_code"]
+    profile = temperature_profile(history, country, latest_date)
+    if profile is None:
+        return None
+
+    logger.info(
+        f"Heat note for {country}, {profile['high_c']} C, "
+        f"alert={profile['heat_alert']}."
+    )
+
+    model, paragraph = _first_working(
+        client,
+        SPOTLIGHT_MODELS,
+        lambda interaction: (interaction.output_text or "").strip(),
+        system_instruction=_HEAT_RISK_SYSTEM,
+        input=(
+            "Temperatures are Celsius. This country had the highest daily high "
+            "of any country covered today.\n\n" + json.dumps(profile, indent=2)
+        ),
+    )
+    if not paragraph:
+        return None
+
+    return {
+        "country_code": country,
+        "date": profile["date"],
+        "model": model,
+        "paragraph": paragraph,
+        "figures": profile,
+    }
+
+
 def country_briefings(
     latest: pd.DataFrame,
     client,
@@ -421,20 +580,23 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
     # Weather is a whole Gold table younger than the rest, and a day where it
     # failed to land should still get an air-quality brief. Read it defensively
     # and let an absence be an absence.
+    # The whole table, not just today: the heat note needs the days behind the
+    # hottest one to say whether the heat arrived gradually or all at once.
     try:
-        weather = filter_report_countries(
+        weather_history = filter_report_countries(
             read_delta(f"s3://{gold}/daily_country_weather")
         )
-        weather = weather[weather["partition_date"] == latest_date]
+        weather = weather_history[weather_history["partition_date"] == latest_date]
     except Exception as exc:
         logger.warning(f"Gold weather unavailable for the brief: {exc}")
-        weather = None
+        weather_history = weather = None
 
     brief: dict = {
         "generated_at": datetime.now(tz=timezone.utc).isoformat(),
         "model": None,
         "date": latest_date,
         "fact_check": None,
+        "heat_spotlight": None,
         "briefings": [],
     }
 
@@ -470,14 +632,27 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         logger.warning(f"Anomaly fact-check failed (non-fatal): {exc}")
 
     try:
+        brief["heat_spotlight"] = heat_spotlight(weather_history, client, latest_date)
+    except Exception as exc:
+        logger.warning(f"Heat note failed (non-fatal): {exc}")
+
+    try:
         model, brief["briefings"] = country_briefings(latest, client, weather)
         # The report caption names the model that actually answered, which the
         # ladder makes a runtime fact rather than a constant.
-        brief["model"] = model or (brief["fact_check"] or {}).get("model")
+        brief["model"] = (
+            model
+            or (brief["fact_check"] or {}).get("model")
+            or (brief["heat_spotlight"] or {}).get("model")
+        )
     except Exception as exc:
         logger.warning(f"Country briefings failed (non-fatal): {exc}")
 
-    if brief["fact_check"] is None and not brief["briefings"]:
+    if (
+        brief["fact_check"] is None
+        and brief["heat_spotlight"] is None
+        and not brief["briefings"]
+    ):
         logger.warning("AI brief produced nothing — not writing a file.")
         return
 
@@ -487,7 +662,8 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
     logger.success(
         f"AI brief written: {len(brief['briefings'])} briefing(s) "
         f"via {brief['model'] or 'no model'}, "
-        f"fact-check={'yes' if brief['fact_check'] else 'no'} -> {out}"
+        f"fact-check={'yes' if brief['fact_check'] else 'no'}, "
+        f"heat-note={'yes' if brief['heat_spotlight'] else 'no'} -> {out}"
     )
 
 
