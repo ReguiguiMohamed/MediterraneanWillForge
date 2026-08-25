@@ -211,6 +211,9 @@ jobs:
           MINIO_ACCESS_KEY:            minioadmin
           MINIO_SECRET_KEY:            minioadmin
           PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
+          # Fixtures are dated January 2024; the rolling window would exclude
+          # every one of them and leave Gold with nothing to build.
+          GOLD_WINDOW_DAYS:            all
         run: python -c "from data.ingestion.gold.marts import run; run()"
 
       - name: Run Gold anomaly detection
@@ -219,6 +222,9 @@ jobs:
           MINIO_ACCESS_KEY:            minioadmin
           MINIO_SECRET_KEY:            minioadmin
           PROMETHEUS_PUSHGATEWAY_URL:  http://localhost:9091
+          # Fixtures are dated January 2024; the rolling window would exclude
+          # every one of them and leave Gold with nothing to build.
+          GOLD_WINDOW_DAYS:            all
         run: python -c "from data.ingestion.gold.anomaly import run; run()"
 
       - name: Verify Gold layer tables

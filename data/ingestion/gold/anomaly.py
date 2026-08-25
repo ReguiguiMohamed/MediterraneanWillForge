@@ -49,8 +49,9 @@ from loguru import logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 from sklearn.ensemble import IsolationForest
 
+from data.ingestion.gold.window import merge_refreshed, read_silver_window
 from data.metrics import push_to_grafana
-from data.storage import delta_storage_options, read_delta
+from data.storage import delta_storage_options
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ def run(silver_df: pd.DataFrame | None = None) -> None:
     if silver_df is None:
         silver_path = f"s3://{silver_bucket}/air_quality"
         try:
-            silver_df = read_delta(silver_path, storage_opts)
+            silver_df = read_silver_window(silver_path, storage_opts)
         except Exception as exc:
             raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
 
@@ -169,6 +170,9 @@ def run(silver_df: pd.DataFrame | None = None) -> None:
 
     # ── Write Gold anomaly_alerts ──────────────────────────────────────────────
     anomaly_path = f"s3://{gold_bucket}/anomaly_alerts"
+    # The model is refit on the window each run, so scores inside the refresh
+    # period move with the current distribution while older verdicts stand.
+    result = merge_refreshed(anomaly_path, result, storage_opts)
     write_deltalake(
         anomaly_path,
         result,

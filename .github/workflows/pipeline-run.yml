@@ -57,6 +57,11 @@ env:
   WEATHER_BACKFILL_START:              ${{ inputs.weather_backfill_start }}
   WEATHER_BACKFILL_END:                ${{ inputs.weather_backfill_end }}
   WEATHER_REBUILD:                     ${{ inputs.weather_rebuild }}
+  # Gold normally reads a 60-day window of Silver and rewrites its last 14
+  # days, which is what keeps its cost flat as history grows. A backfill lands
+  # Silver partitions far older than that, so it has to rebuild in full or
+  # those dates never reach Gold at all.
+  GOLD_WINDOW_DAYS:                    ${{ (inputs.backfill_start || inputs.weather_backfill_start) && 'all' || '' }}
   OPENAQ_API_KEY:                      ${{ secrets.OPENAQ_API_KEY }}
   WAQI_API_KEY:                        ${{ secrets.WAQI_API_KEY }}
   GRAFANA_REMOTE_WRITE_URL:            ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}

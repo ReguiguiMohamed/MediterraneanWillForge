@@ -34,7 +34,7 @@ def test_run_fails_when_silver_is_unreadable(monkeypatch):
 def test_run_fails_when_silver_is_empty(monkeypatch):
 
     monkeypatch.setattr(anomaly, "delta_storage_options", lambda: {})
-    monkeypatch.setattr(anomaly, "read_delta", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(anomaly, "read_silver_window", lambda *a, **k: pd.DataFrame())
 
     with pytest.raises(RuntimeError, match="Silver layer is empty"):
         anomaly.run()

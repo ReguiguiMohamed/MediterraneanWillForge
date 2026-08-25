@@ -93,8 +93,20 @@ Hosted lake: Backblaze B2        Local and CI lake: MinIO
 ```
 
 Every Delta write is followed by a checkpoint, so later reads skip replaying the
-log. That matters: the B2 free tier caps Class B transactions, and the Gold
-stage reads all of Silver on every run.
+log. That matters, because the B2 free tier caps Class B transactions per day
+and the pipeline is built to stay inside it.
+
+The Gold stage is where that cap gets spent. Silver is partitioned by date, so
+reading it costs one object fetch per partition per source, and rebuilding all
+of Gold from all of Silver every night grew by four fetches a day forever. By
+late August 2026 it was 551 fetches a night, four fifths of the whole run,
+recomputing months of rows that had not changed since the day they landed.
+
+So Gold now reads the last 60 days of Silver and rewrites the last 14 days of
+each table, splicing the result in front of the history already there. The gap
+between the two numbers is deliberate: a heat alert compares a day against its
+station's previous 30, so the oldest refreshed day still needs a month of
+lead-in behind it. The cost is flat rather than growing.
 
 More detail in [architecture](docs/architecture.md) and
 [ADR-001](docs/adr/001-lakehouse-format.md).
@@ -214,8 +226,9 @@ tests/               unit and MinIO integration tests
 - Weather covers the 12 city grid points, not every OpenAQ or WAQI station, so a
   country's alert describes its anchor cities. Tornadoes are not in the feed;
   the closest signal is a storm-force gust.
-- Gold rebuilds from all of Silver daily, so read cost grows with history. The
-  B2 free tier will eventually need incremental Gold or coarser partitioning.
+- Gold reads a 60-day window of Silver and rewrites its last 14 days, so a
+  partition that lands more than two weeks late needs a backfill run to reach
+  Gold. Backfills pass `GOLD_WINDOW_DAYS=all` and rebuild in full.
 - dbt runs against MinIO in CI only, never in the scheduled B2 pipeline.
 - The AI brief is generated text. It is grounded in the pipeline's numbers and
   cites sources, but it is not a substitute for reading the data.

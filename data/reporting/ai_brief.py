@@ -397,10 +397,20 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
     gold = os.environ.get("MINIO_BUCKET_GOLD", "gold")
     # Same filters the charts use — a briefing about a country the report excludes
     # would contradict every figure next to it.
-    summary = filter_report_countries(read_delta(f"s3://{gold}/daily_country_summary"))
-    anomalies = filter_anomaly_model_sources(
-        filter_report_countries(read_delta(f"s3://{gold}/anomaly_alerts"))
-    )
+    #
+    # Guarded because this section is best-effort and the step that runs it is
+    # not. An exhausted B2 daily cap 403s here, and an unguarded raise turned
+    # that into a failed report build rather than a report without a brief.
+    try:
+        summary = filter_report_countries(
+            read_delta(f"s3://{gold}/daily_country_summary")
+        )
+        anomalies = filter_anomaly_model_sources(
+            filter_report_countries(read_delta(f"s3://{gold}/anomaly_alerts"))
+        )
+    except Exception as exc:
+        logger.warning(f"Gold unreadable — skipping the AI brief entirely: {exc}")
+        return
 
     latest_date = str(summary["partition_date"].max())
     latest = summary[summary["partition_date"] == latest_date]

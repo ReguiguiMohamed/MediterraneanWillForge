@@ -21,8 +21,12 @@ Three analytics-ready marts are produced on each run:
      only ever sees the partitions it has not processed yet, and a heatwave is
      a statement about the days around a day.
 
-Gold tables are written with mode=overwrite — they are always rebuilt
-from the full Silver layer so consumers always get a consistent snapshot.
+Each run reads a rolling window of Silver and rewrites only the most recent
+slice of each Gold table, splicing it in front of the history already there.
+Rebuilding all of Gold from all of Silver every night cost one object fetch per
+Silver partition per source and grew by four a day forever. Set
+GOLD_WINDOW_DAYS=all to rebuild in full, which a backfill needs. See
+data/ingestion/gold/window.py.
 """
 
 from __future__ import annotations
@@ -36,8 +40,9 @@ from deltalake import DeltaTable, write_deltalake
 from loguru import logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
+from data.ingestion.gold.window import merge_refreshed, read_silver_window
 from data.metrics import push_to_grafana
-from data.storage import delta_storage_options, read_delta
+from data.storage import delta_storage_options
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -327,7 +332,7 @@ def _read_silver_weather(
     contracts still fail the pipeline if the table stays missing.
     """
     try:
-        return read_delta(f"s3://{silver_bucket}/weather", storage_opts)
+        return read_silver_window(f"s3://{silver_bucket}/weather", storage_opts)
     except Exception as exc:
         logger.warning(f"Silver weather not readable — weather mart skipped: {exc}")
         return pd.DataFrame()
@@ -368,7 +373,7 @@ def run(
     if silver_df is None:
         silver_path = f"s3://{silver_bucket}/air_quality"
         try:
-            silver_df = read_delta(silver_path, storage_opts)
+            silver_df = read_silver_window(silver_path, storage_opts)
         except Exception as exc:
             raise RuntimeError(f"Cannot read Silver layer: {exc}") from exc
 
@@ -380,8 +385,10 @@ def run(
     )
 
     # ── daily_country_summary ─────────────────────────────────────────────────
-    summary = build_daily_country_summary(silver_df)
     _summary_path = f"s3://{gold_bucket}/daily_country_summary"
+    summary = merge_refreshed(
+        _summary_path, build_daily_country_summary(silver_df), storage_opts
+    )
     write_deltalake(
         _summary_path,
         summary,
@@ -399,8 +406,10 @@ def run(
     logger.info(f"Gold daily_country_summary: {len(summary)} rows written.")
 
     # ── wildfire_risk_index ───────────────────────────────────────────────────
-    risk = build_wildfire_risk_index(silver_df)
     _risk_path = f"s3://{gold_bucket}/wildfire_risk_index"
+    risk = merge_refreshed(
+        _risk_path, build_wildfire_risk_index(silver_df), storage_opts
+    )
     write_deltalake(
         _risk_path,
         risk,
@@ -423,8 +432,10 @@ def run(
     if weather_df.empty:
         logger.warning("Silver weather is empty — daily_country_weather not rebuilt.")
     else:
-        country_weather = build_daily_country_weather(weather_df)
         _weather_path = f"s3://{gold_bucket}/daily_country_weather"
+        country_weather = merge_refreshed(
+            _weather_path, build_daily_country_weather(weather_df), storage_opts
+        )
         write_deltalake(
             _weather_path,
             country_weather,

@@ -31,9 +31,16 @@ def delta_storage_options(
 
 
 def read_delta(
-    path: str, storage_options: dict[str, str] | None = None
+    path: str,
+    storage_options: dict[str, str] | None = None,
+    filters: list[tuple] | None = None,
 ) -> pd.DataFrame:
-    """Read a Delta table into pandas.
+    """Read a Delta table into pandas, optionally only some partitions.
+
+    `filters` takes pyarrow predicates such as [("partition_date", ">=", d)].
+    Applied to a partition column they prune whole files, so a windowed read
+    costs one object fetch per partition kept rather than one per partition
+    that exists.
 
     Deliberately has no retry: the failures seen in practice are B2 daily-cap
     403s, which are not transient — retrying them only burns more of the
@@ -41,4 +48,5 @@ def read_delta(
     """
     if storage_options is None:
         storage_options = delta_storage_options()
-    return DeltaTable(path, storage_options=storage_options).to_pandas()
+    table = DeltaTable(path, storage_options=storage_options)
+    return table.to_pandas(filters=filters) if filters else table.to_pandas()

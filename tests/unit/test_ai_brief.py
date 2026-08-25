@@ -354,3 +354,19 @@ def test_a_fully_spent_ladder_costs_the_section_not_the_run(monkeypatch):
     client = SimpleNamespace(interactions=SimpleNamespace(create=create))
 
     assert ai_brief.fact_check_anomaly(ANOMALY, STATS, client) is None
+
+
+def test_unreadable_gold_skips_the_brief_instead_of_raising(tmp_path, monkeypatch):
+    """The step that runs this is not best-effort, so the module must be."""
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr(ai_brief, "_client", lambda: object())
+
+    def capped(*a, **k):
+        raise OSError("403 Forbidden: transaction (Class B) cap exceeded")
+
+    monkeypatch.setattr(ai_brief, "read_delta", capped)
+    out = tmp_path / "ai_brief.json"
+
+    ai_brief.run(out)
+
+    assert not out.exists()
