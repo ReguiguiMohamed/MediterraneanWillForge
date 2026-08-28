@@ -153,3 +153,58 @@ def test_a_full_rebuild_reads_without_a_filter(monkeypatch):
     window.read_silver_window("s3://silver/air_quality", {})
 
     assert seen["filters"] is None
+
+
+def test_a_body_decode_failure_falls_back_to_sequential_partitions(monkeypatch):
+    monkeypatch.setenv("GOLD_WINDOW_DAYS", "60")
+    recent, older = _day(1), _day(2)
+    reads = []
+
+    def body_decode(*args, **kwargs):
+        raise OSError("Generic S3 error: error decoding response body")
+
+    class _Table:
+        def __init__(self, path, storage_options=None):
+            pass
+
+        def files(self):
+            return [
+                f"partition_date={recent}/source=weather/recent.parquet",
+                f"partition_date={older}/source=weather/older.parquet",
+            ]
+
+        def to_pandas(self, filters=None):
+            partition = filters[0][2]
+            reads.append(partition)
+            return pd.DataFrame({"value": [partition]})
+
+    monkeypatch.setattr(window, "read_delta", body_decode)
+    monkeypatch.setattr(window, "DeltaTable", _Table)
+
+    frame = window.read_silver_window("s3://silver/weather", {})
+
+    assert reads == sorted([recent, older])
+    assert sorted(frame["partition_date"]) == sorted([recent, older])
+
+
+def test_sequential_fallback_names_the_unreadable_partition(monkeypatch):
+    broken = _day(1)
+
+    def body_decode(*args, **kwargs):
+        raise OSError("Generic S3 error: error decoding response body")
+
+    class _Table:
+        def __init__(self, path, storage_options=None):
+            pass
+
+        def files(self):
+            return [f"partition_date={broken}/source=weather/broken.parquet"]
+
+        def to_pandas(self, filters=None):
+            raise OSError("bad object")
+
+    monkeypatch.setattr(window, "read_delta", body_decode)
+    monkeypatch.setattr(window, "DeltaTable", _Table)
+
+    with pytest.raises(RuntimeError, match=broken):
+        window.read_silver_window("s3://silver/weather", {})

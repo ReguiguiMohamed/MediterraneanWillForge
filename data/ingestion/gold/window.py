@@ -25,9 +25,10 @@ import os
 from datetime import date, timedelta
 
 import pandas as pd
+from deltalake import DeltaTable
 from loguru import logger
 
-from data.storage import read_delta
+from data.storage import delta_storage_options, read_delta
 
 # Silver days read per run. Must clear REFRESH_DAYS plus the 30-day baseline
 # that flag_heat_events looks back over, with room to spare.
@@ -71,13 +72,57 @@ def read_silver_window(
     path: str, storage_options: dict[str, str] | None = None
 ) -> pd.DataFrame:
     """Read Silver from the window cutoff onwards, or all of it when unbounded."""
-    cutoff = _cutoff(window_days())
+    days = window_days()
+    cutoff = _cutoff(days)
+    options = (
+        storage_options if storage_options is not None else delta_storage_options()
+    )
     if cutoff is None:
         logger.info(f"Reading all of {path} (full rebuild).")
-        return read_delta(path, storage_options)
+        filters = None
+    else:
+        logger.info(f"Reading {path} from {cutoff} onwards ({days}-day window).")
+        filters = [("partition_date", ">=", cutoff)]
 
-    logger.info(f"Reading {path} from {cutoff} onwards ({window_days()}-day window).")
-    return read_delta(path, storage_options, filters=[("partition_date", ">=", cutoff)])
+    try:
+        return read_delta(path, options, filters=filters)
+    except Exception as exc:
+        if "error decoding response body" not in str(exc).lower():
+            raise
+        logger.warning(
+            f"Window read failed for {path}; retrying one partition at a time: {exc}"
+        )
+        return _read_partitions_sequentially(path, options, cutoff)
+
+
+def _read_partitions_sequentially(
+    path: str, storage_options: dict[str, str], cutoff: str | None
+) -> pd.DataFrame:
+    """Avoid delta-rs' wide parallel scan after an object-body decode failure."""
+    table = DeltaTable(path, storage_options=storage_options)
+    dates = sorted(
+        {
+            segment.split("=", 1)[1]
+            for file in table.files()
+            for segment in file.replace("\\", "/").split("/")
+            if segment.startswith("partition_date=")
+            and (cutoff is None or segment.split("=", 1)[1] >= cutoff)
+        }
+    )
+    frames = []
+    for partition in dates:
+        try:
+            frame = table.to_pandas(filters=[("partition_date", "=", partition)])
+        except Exception as exc:
+            raise RuntimeError(
+                f"Cannot read {path} partition {partition}: {exc}"
+            ) from exc
+        if not frame.empty and "partition_date" not in frame.columns:
+            frame = frame.copy()
+            frame["partition_date"] = partition
+        frames.append(frame)
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def refresh_cutoff() -> str | None:

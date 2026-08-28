@@ -25,7 +25,7 @@ def test_run_fails_when_silver_is_unreadable(monkeypatch):
         raise OSError("storage unavailable")
 
     monkeypatch.setattr(anomaly, "delta_storage_options", lambda: {})
-    monkeypatch.setattr(anomaly, "DeltaTable", unreadable_table)
+    monkeypatch.setattr(anomaly, "read_silver_window", unreadable_table)
 
     with pytest.raises(RuntimeError, match="Cannot read Silver layer"):
         anomaly.run()

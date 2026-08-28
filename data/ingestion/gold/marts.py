@@ -37,6 +37,7 @@ import time
 import numpy as np
 import pandas as pd
 from deltalake import DeltaTable, write_deltalake
+from deltalake.exceptions import TableNotFoundError
 from loguru import logger
 from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
@@ -333,9 +334,11 @@ def _read_silver_weather(
     """
     try:
         return read_silver_window(f"s3://{silver_bucket}/weather", storage_opts)
-    except Exception as exc:
+    except TableNotFoundError as exc:
         logger.warning(f"Silver weather not readable — weather mart skipped: {exc}")
         return pd.DataFrame()
+    except Exception as exc:
+        raise RuntimeError(f"Cannot read Silver weather: {exc}") from exc
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
