@@ -135,16 +135,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      # GitHub Actions service containers do not reliably support CMD overrides,
-      # so MinIO is started manually with its full command.
+      # MinIO's images on Docker Hub and quay.io no longer pull anonymously,
+      # so CI runs Bitnami's frozen build, pinned by digest.
       - name: Start MinIO
         run: |
           docker run -d --name minio-ci \
             -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z \
-            server /data --console-address ":9001"
+            bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
 
       - name: Wait for MinIO to be healthy
         run: |
@@ -154,16 +153,22 @@ jobs:
             sleep 5
           done
 
+      # The AWS CLI ships on the runner image. Retries cover the restart
+      # Bitnami's entrypoint does after its first boot.
       - name: Create lakehouse buckets
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
         run: |
-          docker run --rm --network host \
-            --entrypoint /bin/sh \
-            minio/mc:RELEASE.2025-08-13T08-35-41Z -c "
-              mc alias set local http://localhost:9000 minioadmin minioadmin && \
-              mc mb --ignore-existing local/bronze && \
-              mc mb --ignore-existing local/silver && \
-              mc mb --ignore-existing local/gold
-            "
+          for bucket in bronze silver gold; do
+            for i in $(seq 1 10); do
+              aws --endpoint-url http://localhost:9000 s3api head-bucket --bucket "$bucket" 2>/dev/null && break
+              aws --endpoint-url http://localhost:9000 s3 mb "s3://$bucket" && break
+              sleep 3
+            done
+            aws --endpoint-url http://localhost:9000 s3api head-bucket --bucket "$bucket"
+          done
 
       - name: Run integration tests
         env:
@@ -192,10 +197,11 @@ jobs:
 
       - name: Inspect MinIO silver layout
         # Shows exact file paths — confirms Silver data exists and glob depth is correct.
-        run: |
-          docker run --rm --network host \
-            --entrypoint /bin/sh minio/mc:RELEASE.2025-08-13T08-35-41Z -c \
-            "mc alias set local http://localhost:9000 minioadmin minioadmin && mc ls --recursive local/silver/air_quality | head -20"
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+        run: aws --endpoint-url http://localhost:9000 s3 ls --recursive s3://silver/air_quality/ | head -20
 
       - name: Verify Silver layer has rows
         # Fails loudly here rather than letting dbt silently report "no files found".

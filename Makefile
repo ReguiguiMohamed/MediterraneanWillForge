@@ -51,7 +51,7 @@ test-unit: ## Run unit tests with coverage
 	pytest tests/unit/ -v --tb=short --cov=data --cov-report=term-missing
 
 test-integration: ## Run deterministic integration tests against local MinIO
-	$(COMPOSE_LOCAL) --profile jobs up -d minio minio-init
+	$(COMPOSE_LOCAL) --profile jobs up -d minio
 	MINIO_ENDPOINT=http://localhost:9000 \
 	MINIO_ACCESS_KEY=minioadmin \
 	MINIO_SECRET_KEY=minioadmin \

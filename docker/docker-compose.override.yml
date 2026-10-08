@@ -9,19 +9,21 @@ volumes:
 services:
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # MinIO's own images no longer pull anonymously. Bitnami's frozen build
+    # does, and it creates the buckets on first boot.
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
     container_name: med-ops-minio
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_DEFAULT_BUCKETS: bronze,silver,gold
       MINIO_PROMETHEUS_AUTH_TYPE: public
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/data
+      - minio_data:/bitnami/minio/data
     networks:
       - fortress
     healthcheck:
@@ -29,24 +31,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
-    container_name: med-ops-minio-init
-    profiles:
-      - jobs
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        mc alias set local http://minio:9000 minioadmin minioadmin &&
-        mc mb --ignore-existing local/bronze &&
-        mc mb --ignore-existing local/silver &&
-        mc mb --ignore-existing local/gold
-    networks:
-      - fortress
-    depends_on:
-      minio:
-        condition: service_healthy
 
   ingestion:
     environment:
@@ -59,8 +43,6 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
 
   quality:
     environment:
@@ -73,5 +55,3 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
