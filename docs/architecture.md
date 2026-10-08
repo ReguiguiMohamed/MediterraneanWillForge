@@ -64,7 +64,7 @@ boundary for local development and CI.
 | Gold marts | `data/ingestion/gold/marts.py` | Country summaries, the wildfire risk index, and daily country weather with heat and cold alerts. |
 | Gold anomaly | `data/ingestion/gold/anomaly.py` | Isolation Forest on concentration-compatible Open-Meteo and OpenAQ rows. |
 | Quality | `data/quality/run_checks.py` | Great Expectations checks for requested Bronze and Silver partitions. |
-| Output verification | `data/quality/verify_outputs.py` | Gold schema, value-domain, source, and requested-date contracts. |
+| Output verification | `data/quality/verify_outputs.py` | Runs the Gold data contracts in `data/contracts/` through datacontract-cli, then checks the requested dates. |
 | dbt | `data/dbt/` | DuckDB models compiled and executed against MinIO in CI. |
 | AI brief | `data/reporting/ai_brief.py` | Anomaly fact-check, country briefings, and the seasonal spotlight from Gemini. |
 | Report | `docs/pipeline_report.ipynb` | Reads Gold, writes the HTML report, readiness CSV, and eight charts. The weather chart follows the season set in `data/reporting/season.py`. |

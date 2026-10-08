@@ -1,228 +1,70 @@
-"""Validate retained Gold Delta tables against their output contracts."""
+"""Check retained Gold Delta tables against their data contracts.
+
+The contracts live in data/contracts as Open Data Contract Standard files and
+run through datacontract-cli. Each table is read from Delta once, written to a
+temporary Parquet file and checked there, so the contracts cost no extra
+object-store reads.
+"""
 
 from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
+import tempfile
+from pathlib import Path
 
 import pandas as pd
+from datacontract.data_contract import DataContract
+from datacontract.model.run import ResultEnum
 from loguru import logger
+from open_data_contract_standard.model import OpenDataContractStandard, Server
 
 from data.quality.run_checks import parse_partition_dates
 from data.storage import delta_storage_options, read_delta
 
-
-@dataclass(frozen=True)
-class GoldTableContract:
-    name: str
-    required_columns: frozenset[str]
-
-
-GOLD_TABLE_CONTRACTS = (
-    GoldTableContract(
-        name="daily_country_summary",
-        required_columns=frozenset(
-            {
-                "partition_date",
-                "country_code",
-                "source",
-                "mean_pm2_5",
-                "max_pm2_5",
-                "mean_pm10",
-                "mean_no2",
-                "mean_o3",
-                "station_count",
-                "who_pm25_exceed_pct",
-                "who_pm10_exceed_pct",
-                "who_no2_exceed_pct",
-                "who_o3_exceed_pct",
-            }
-        ),
-    ),
-    GoldTableContract(
-        name="wildfire_risk_index",
-        required_columns=frozenset(
-            {
-                "partition_date",
-                "source",
-                "station_id",
-                "risk_index",
-                "risk_level",
-            }
-        ),
-    ),
-    GoldTableContract(
-        name="daily_country_weather",
-        required_columns=frozenset(
-            {
-                "partition_date",
-                "country_code",
-                "stations",
-                "temp_max_c",
-                "temp_mean_c",
-                "temp_min_c",
-                "condition",
-                "wind_level",
-                "dust_level",
-                "heat_alert",
-                "heat_streak_days",
-                "cold_alert",
-                "cold_streak_days",
-            }
-        ),
-    ),
-    GoldTableContract(
-        name="anomaly_alerts",
-        required_columns=frozenset(
-            {
-                "partition_date",
-                "source",
-                "station_id",
-                "anomaly_score",
-                "is_anomaly",
-            }
-        ),
-    ),
+CONTRACTS_DIR = Path(__file__).resolve().parents[1] / "contracts"
+GOLD_TABLES = (
+    "daily_country_summary",
+    "wildfire_risk_index",
+    "daily_country_weather",
+    "anomaly_alerts",
 )
 
 
+def check_contract(name: str, frame: pd.DataFrame) -> list[str]:
+    """Return the failed contract checks for one Gold table frame."""
+    contract = OpenDataContractStandard.from_file(
+        str(CONTRACTS_DIR / f"gold_{name}.odcs.yaml")
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"{name}.parquet"
+        frame.to_parquet(path, index=False)
+        contract.servers = [
+            Server(server="frame", type="local", format="parquet", path=str(path))
+        ]
+        run = DataContract(data_contract=contract).test()
+
+    # Parquet type checks come back as warnings, so only failures and errors
+    # break the contract.
+    return [
+        f"gold/{name}: {check.name}: {check.reason}"
+        for check in run.checks
+        if check.result in (ResultEnum.failed, ResultEnum.error)
+    ]
+
+
 def validate_gold_frame(
-    contract: GoldTableContract,
+    name: str,
     frame: pd.DataFrame,
     target_dates: list[str],
 ) -> list[str]:
-    """Return contract violations for one Gold table frame."""
-    errors = []
-    prefix = f"gold/{contract.name}"
-
-    if frame.empty:
-        return [f"{prefix}: table exists but has 0 rows"]
-
-    missing_columns = contract.required_columns - set(frame.columns)
-    if missing_columns:
-        return [f"{prefix}: missing columns {sorted(missing_columns)}"]
-
-    if target_dates:
-        available_dates = set(frame["partition_date"].astype(str))
-        missing_dates = sorted(set(target_dates) - available_dates)
-        if missing_dates:
-            errors.append(f"{prefix}: missing requested partition(s) {missing_dates}")
-
-    if contract.name == "daily_country_summary":
-        errors.extend(_validate_daily_summary(frame, prefix))
-    elif contract.name == "wildfire_risk_index":
-        errors.extend(_validate_wildfire_risk(frame, prefix))
-    elif contract.name == "anomaly_alerts":
-        errors.extend(_validate_anomaly_alerts(frame, prefix))
-    elif contract.name == "daily_country_weather":
-        errors.extend(_validate_country_weather(frame, prefix))
-
-    return errors
-
-
-HEAT_ALERT_LEVELS = {"none", "heat_advisory", "heatwave", "extreme_heatwave"}
-COLD_ALERT_LEVELS = {"none", "cold_advisory", "cold_wave", "severe_cold_wave"}
-
-# Wider than the Mediterranean ever gets. This catches a unit swap or a decimal
-# slip from upstream, not a warm afternoon.
-_PLAUSIBLE_TEMP_C = (-60.0, 60.0)
-
-
-def _validate_country_weather(frame: pd.DataFrame, prefix: str) -> list[str]:
-    errors = []
-
-    low, high = _PLAUSIBLE_TEMP_C
-    for column in ("temp_max_c", "temp_mean_c", "temp_min_c"):
-        outside = frame[column].notna() & (
-            (frame[column] < low) | (frame[column] > high)
-        )
-        if outside.any():
-            errors.append(
-                f"{prefix}: {int(outside.sum())} {column} values outside "
-                f"[{low}, {high}] C"
-            )
-
-    inverted = (
-        frame["temp_max_c"].notna()
-        & frame["temp_min_c"].notna()
-        & (frame["temp_max_c"] < frame["temp_min_c"])
-    )
-    if inverted.any():
-        errors.append(f"{prefix}: {int(inverted.sum())} rows with a low above the high")
-
-    for column, levels in (
-        ("heat_alert", HEAT_ALERT_LEVELS),
-        ("cold_alert", COLD_ALERT_LEVELS),
-    ):
-        unknown = set(frame[column].dropna().unique()) - levels
-        if unknown:
-            errors.append(f"{prefix}: unexpected {column} values {sorted(unknown)}")
-
-    for column in ("heat_streak_days", "cold_streak_days"):
-        negative = frame[column].notna() & (frame[column] < 0)
-        if negative.any():
-            errors.append(f"{prefix}: {int(negative.sum())} negative {column} values")
-
-    return errors
-
-
-def _validate_daily_summary(frame: pd.DataFrame, prefix: str) -> list[str]:
-    errors = []
-    negative_pm25 = frame["mean_pm2_5"].notna() & (frame["mean_pm2_5"] < 0)
-    if negative_pm25.any():
-        errors.append(f"{prefix}: {int(negative_pm25.sum())} negative PM2.5 rows")
-
-    percentage_columns = (
-        "who_pm25_exceed_pct",
-        "who_pm10_exceed_pct",
-        "who_no2_exceed_pct",
-        "who_o3_exceed_pct",
-    )
-    for column in percentage_columns:
-        invalid = frame[column].notna() & ((frame[column] < 0) | (frame[column] > 100))
-        if invalid.any():
-            errors.append(
-                f"{prefix}: {int(invalid.sum())} {column} values outside [0, 100]"
-            )
-    return errors
-
-
-def _validate_wildfire_risk(frame: pd.DataFrame, prefix: str) -> list[str]:
-    errors = []
-    invalid_risk = frame["risk_index"].notna() & (
-        (frame["risk_index"] < 0) | (frame["risk_index"] > 100)
-    )
-    if invalid_risk.any():
-        errors.append(
-            f"{prefix}: {int(invalid_risk.sum())} risk_index values outside [0, 100]"
-        )
-
-    valid_levels = {"low", "moderate", "high", "extreme"}
-    unknown_levels = set(frame["risk_level"].dropna().unique()) - valid_levels
-    if unknown_levels:
-        errors.append(f"{prefix}: unexpected risk levels {sorted(unknown_levels)}")
-    return errors
-
-
-def _validate_anomaly_alerts(frame: pd.DataFrame, prefix: str) -> list[str]:
-    errors = []
-    invalid_flags = set(frame["is_anomaly"].dropna().unique()) - {
-        0,
-        1,
-        False,
-        True,
-    }
-    if invalid_flags:
-        errors.append(f"{prefix}: unexpected anomaly flags {sorted(invalid_flags)}")
-
-    valid_sources = {"openmeteo", "openaq"}
-    invalid_sources = set(frame["source"].dropna().unique()) - valid_sources
-    if invalid_sources:
-        errors.append(
-            f"{prefix}: concentration model contains sources "
-            f"{sorted(invalid_sources)}"
-        )
+    """Return contract violations and missing requested partitions."""
+    errors = check_contract(name, frame)
+    if target_dates and "partition_date" in frame:
+        available = set(frame["partition_date"].astype(str))
+        missing = sorted(set(target_dates) - available)
+        if missing:
+            errors.append(f"gold/{name}: missing requested partition(s) {missing}")
     return errors
 
 
@@ -235,19 +77,19 @@ def verify_gold_outputs(
     options = storage_options or delta_storage_options()
     errors = []
 
-    for contract in GOLD_TABLE_CONTRACTS:
-        path = f"s3://{gold_bucket}/{contract.name}"
+    for name in GOLD_TABLES:
+        path = f"s3://{gold_bucket}/{name}"
         logger.info(f"Checking {path}")
         try:
             frame = read_delta(path, options)
         except Exception as exc:
-            errors.append(f"gold/{contract.name}: cannot read Delta table — {exc}")
+            errors.append(f"gold/{name}: cannot read Delta table: {exc}")
             continue
 
-        table_errors = validate_gold_frame(contract, frame, target_dates)
+        table_errors = validate_gold_frame(name, frame, target_dates)
         errors.extend(table_errors)
         if not table_errors:
-            logger.success(f"gold/{contract.name}: {len(frame)} rows, contract OK")
+            logger.success(f"gold/{name}: {len(frame)} rows, contract OK")
 
     return errors
 

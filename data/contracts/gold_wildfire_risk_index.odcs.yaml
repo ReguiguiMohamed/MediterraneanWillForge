@@ -1,0 +1,31 @@
+apiVersion: v3.1.0
+kind: DataContract
+id: gold-wildfire-risk-index
+name: Gold wildfire risk index
+version: 1.0.0
+status: active
+description:
+  purpose: Daily wildfire risk score per station from ozone and PM2.5.
+schema:
+  - name: wildfire_risk_index
+    physicalType: table
+    quality:
+      - metric: rowCount
+        mustBeGreaterThan: 0
+    properties:
+      - name: partition_date
+        logicalType: string
+      - name: source
+        logicalType: string
+      - name: station_id
+        logicalType: string
+      - name: risk_index
+        logicalType: number
+        logicalTypeOptions: {minimum: 0, maximum: 100}
+      - name: risk_level
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [low, moderate, high, extreme]
+            mustBe: 0

@@ -1,0 +1,36 @@
+apiVersion: v3.1.0
+kind: DataContract
+id: gold-anomaly-alerts
+name: Gold anomaly alerts
+version: 1.0.0
+status: active
+description:
+  purpose: Isolation Forest flags on station readings. WAQI reports index values,
+    not concentrations, so it stays out of this model.
+schema:
+  - name: anomaly_alerts
+    physicalType: table
+    quality:
+      - metric: rowCount
+        mustBeGreaterThan: 0
+    properties:
+      - name: partition_date
+        logicalType: string
+      - name: source
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [openmeteo, openaq]
+            mustBe: 0
+      - name: station_id
+        logicalType: string
+      - name: anomaly_score
+        logicalType: number
+      - name: is_anomaly
+        logicalType: integer
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [0, 1]
+            mustBe: 0

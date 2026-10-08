@@ -1,0 +1,62 @@
+apiVersion: v3.1.0
+kind: DataContract
+id: gold-daily-country-weather
+name: Gold daily country weather
+version: 1.0.0
+status: active
+description:
+  purpose: Daily weather per country with heat and cold alerts.
+schema:
+  - name: daily_country_weather
+    physicalType: table
+    quality:
+      - metric: rowCount
+        mustBeGreaterThan: 0
+      - type: sql
+        description: The low never sits above the high.
+        query: SELECT COUNT(*) FROM daily_country_weather WHERE temp_max_c < temp_min_c
+        mustBe: 0
+    properties:
+      - name: partition_date
+        logicalType: string
+      - name: country_code
+        logicalType: string
+      - name: stations
+        logicalType: integer
+      # Wider than the Mediterranean ever gets. This catches a unit swap or a
+      # decimal slip from upstream, not a warm afternoon.
+      - name: temp_max_c
+        logicalType: number
+        logicalTypeOptions: {minimum: -60, maximum: 60}
+      - name: temp_mean_c
+        logicalType: number
+        logicalTypeOptions: {minimum: -60, maximum: 60}
+      - name: temp_min_c
+        logicalType: number
+        logicalTypeOptions: {minimum: -60, maximum: 60}
+      - name: condition
+        logicalType: string
+      - name: wind_level
+        logicalType: string
+      - name: dust_level
+        logicalType: string
+      - name: heat_alert
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [none, heat_advisory, heatwave, extreme_heatwave]
+            mustBe: 0
+      - name: heat_streak_days
+        logicalType: integer
+        logicalTypeOptions: {minimum: 0}
+      - name: cold_alert
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [none, cold_advisory, cold_wave, severe_cold_wave]
+            mustBe: 0
+      - name: cold_streak_days
+        logicalType: integer
+        logicalTypeOptions: {minimum: 0}

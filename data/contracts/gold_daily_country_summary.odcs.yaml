@@ -1,0 +1,47 @@
+apiVersion: v3.1.0
+kind: DataContract
+id: gold-daily-country-summary
+name: Gold daily country summary
+version: 1.0.0
+status: active
+description:
+  purpose: Daily pollutant means and WHO exceedance shares per country and source.
+schema:
+  - name: daily_country_summary
+    physicalType: table
+    quality:
+      - metric: rowCount
+        mustBeGreaterThan: 0
+    properties:
+      - name: partition_date
+        logicalType: string
+      - name: country_code
+        logicalType: string
+      - name: source
+        logicalType: string
+      - name: mean_pm2_5
+        logicalType: number
+        logicalTypeOptions:
+          minimum: 0
+      - name: max_pm2_5
+        logicalType: number
+      - name: mean_pm10
+        logicalType: number
+      - name: mean_no2
+        logicalType: number
+      - name: mean_o3
+        logicalType: number
+      - name: station_count
+        logicalType: integer
+      - name: who_pm25_exceed_pct
+        logicalType: number
+        logicalTypeOptions: {minimum: 0, maximum: 100}
+      - name: who_pm10_exceed_pct
+        logicalType: number
+        logicalTypeOptions: {minimum: 0, maximum: 100}
+      - name: who_no2_exceed_pct
+        logicalType: number
+        logicalTypeOptions: {minimum: 0, maximum: 100}
+      - name: who_o3_exceed_pct
+        logicalType: number
+        logicalTypeOptions: {minimum: 0, maximum: 100}

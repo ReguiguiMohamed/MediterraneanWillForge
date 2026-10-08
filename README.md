@@ -243,7 +243,8 @@ output contracts, runs dbt, and validates the Prometheus and Alertmanager config
 ```text
 .github/workflows/   CI, publishing, pipeline, and report workflows
 data/ingestion/      Bronze, Silver, and Gold jobs
-data/quality/        Great Expectations checks and Gold output contracts
+data/quality/        Bronze and Silver checks, Gold contract runner
+data/contracts/      Gold data contracts (ODCS, run by datacontract-cli)
 data/dbt/            DuckDB models and tests
 data/reporting/      report analytics and the AI brief
 docker/              job images and the local Compose stack

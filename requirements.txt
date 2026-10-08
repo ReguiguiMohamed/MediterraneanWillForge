@@ -10,6 +10,7 @@ tenacity==8.3.0
 
 # Validation and analytics
 great-expectations==0.18.19
+datacontract-cli[duckdb]==1.2.4
 scikit-learn==1.5.0
 
 # Reporting and observability
