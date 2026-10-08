@@ -77,6 +77,26 @@ The detection runs in Gold rather than Silver on purpose. Silver only ever sees
 the partitions it has not processed yet, and whether a day is a heatwave is a
 statement about the days around it.
 
+## Seasons
+
+The weather section of the report follows the meteorological season of the
+latest date and leads with the hazard that defines it around the Mediterranean:
+
+| Season | Months | Focus | Charted |
+| --- | --- | --- | --- |
+| Winter | Dec to Feb | Cold | Nightly lows, cold-wave days |
+| Spring | Mar to May | Saharan dust | Dust, days at high or severe |
+| Summer | Jun to Aug | Heat | Daily highs, heatwave days |
+| Autumn | Sep to Nov | Rain | Daily rain, days with 10 mm or more |
+
+An active heatwave or cold wave takes over in any season. Dust peaks in spring
+over the central and eastern basin
+([Israelevich et al., 2012](https://www.tau.ac.il/~pinhas/accepted/2012/Israelevich_et_al_JGR_2012.pdf)),
+and autumn is the main flash-flood season
+([NHESS, 2012](https://nhess.copernicus.org/articles/12/1255/2012/nhess-12-1255-2012.pdf)).
+The 10 mm bar is the ETCCDI heavy-precipitation index R10mm. To change what a
+season shows, edit [`data/reporting/season.py`](data/reporting/season.py).
+
 ## Architecture
 
 ```text
@@ -106,7 +126,7 @@ So Gold now reads the last 60 days of Silver and rewrites the last 14 days of
 each table, splicing the result in front of the history already there. The gap
 between the two numbers is deliberate: a heat alert compares a day against its
 station's previous 30, so the oldest refreshed day still needs a month of
-lead-in behind it. The cost is flat rather than growing.
+lead-in behind it. The cost stays flat as history grows.
 
 More detail in [architecture](docs/architecture.md) and
 [ADR-001](docs/adr/001-lakehouse-format.md).
@@ -124,8 +144,9 @@ the git history. The notebook that produces them is
 **WHO guideline exceedance**
 ![WHO exceedance](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/who_exceedance.png)
 
-**Daily highs and heatwave days per country**
-![Temperature and heat alerts](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/temperature_heat.png)
+**Seasonal weather per country**: nightly lows and cold waves in winter,
+Saharan dust in spring, highs and heatwaves in summer, rain in autumn.
+![Seasonal weather](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/seasonal_weather.png)
 
 **Top anomaly of the day**, plotted against that day's spread across every
 station, so you can see why the model flagged it.
@@ -138,7 +159,7 @@ Also: [anomaly detection](https://reguiguimohamed.github.io/MediterraneanWillFor
 
 ## AI daily brief
 
-Two short generated sections in the report, both from that run's Gold layer:
+Three short generated sections in the report, all from that run's Gold layer:
 
 - **Anomaly fact-check.** The day's top anomaly goes to the model with that
   day's distribution across all stations. Using Google Search grounding, it
@@ -149,28 +170,31 @@ Two short generated sections in the report, both from that run's Gold layer:
 - **Country briefings.** One to three sentences per country, using only that
   country's own numbers for the day: pollutants against WHO 2021 guidelines,
   plus the day's high, the conditions, and any heat or cold alert.
-- **Heat note.** A paragraph on whichever country ran hottest that day, sitting
-  under the temperature charts: what heat at that level does to people, and
+- **Seasonal spotlight.** A paragraph under the weather charts on the country
+  leading the season's measure: the coldest night in winter, the most dust in
+  spring, the hottest day in summer, the most rain over ten days in autumn. It
+  says what weather at that level does to people or to the ground, and
   whether it arrived gradually or as a swing. Every figure in it, including the
   sharpest day-to-day change and the spread across the last ten days, is
   computed by the pipeline and handed over. Asking a model to spot a jump in a
   list is asking it to do arithmetic it is not reliably good at.
 
-Both are labelled as generated text in the report. Every figure comes from the
+All three are labelled as generated text in the report. Every figure comes from the
 pipeline, not the model.
 
-This runs on Gemini's free tier at no cost. The two sections start on different
-models because neither does both jobs: briefings need a `response_format` JSON
-schema, which `gemini-3.7-flash` honours and `gemini-2.5-flash` ignores; the
-fact-check needs Search grounding, free on 2.5 and unavailable on 3.x.
+This runs on Gemini's free tier at no cost. The fact-check and the briefings
+start on different models because neither model does both jobs. Briefings need
+a `response_format` JSON schema, which `gemini-3.7-flash` honours and
+`gemini-2.5-flash` ignores. The fact-check needs Search grounding, free on 2.5
+and unavailable on 3.x.
 
-Each section then walks a ladder of models and keeps the first usable answer.
+Each of the two then walks a ladder of models and keeps the first usable answer.
 Free-tier quota is counted per model, and `gemini-3.7-flash` allows only 20
 requests a day, so a spent quota drops the section to `gemini-2.5-flash` and
 then `gemini-2.5-flash-lite` instead of dropping it from the report. The caption
-names whichever model actually wrote it.
+names the model that wrote it.
 
-The heat note runs its ladder cheapest-first instead. It is one paragraph over a
+The spotlight runs its ladder cheapest-first. It is one paragraph over a
 dozen figures that are already computed, which the smallest model handles, and
 starting at the bottom keeps it out of the 20-a-day quota the briefings need.
 
@@ -178,7 +202,7 @@ To turn it on, get a key from [Google AI Studio](https://aistudio.google.com/api
 (no card needed) and add it as a `GEMINI_API_KEY` repository secret under
 Settings, Secrets and variables, Actions. **Never commit the key.** This repo is
 public and scanners find committed keys within minutes. Without the secret the
-pipeline behaves exactly as before and the report just omits the section.
+pipeline runs as usual and the report omits the generated sections.
 
 Raw output: [`ai_brief.json`](https://reguiguimohamed.github.io/MediterraneanWillForge/ai_brief.json).
 
@@ -234,8 +258,8 @@ tests/               unit and MinIO integration tests
 - OpenAQ coverage is sparse and rate-limited, so zero-row days happen.
 - WAQI has no free historical endpoint and reports IAQI, not concentrations.
 - Weather covers the 12 city grid points, not every OpenAQ or WAQI station, so a
-  country's alert describes its anchor cities. Tornadoes are not in the feed;
-  the closest signal is a storm-force gust.
+  country's alert describes its anchor cities. Tornadoes are not in the feed.
+  The closest signal is a storm-force gust.
 - Gold reads a 60-day window of Silver and rewrites its last 14 days, so a
   partition that lands more than two weeks late needs a backfill run to reach
   Gold. Backfills pass `GOLD_WINDOW_DAYS=all` and rebuild in full.

@@ -2,23 +2,29 @@
 
 ## Boundary
 
-The maintained system has three real API ingestors, a Delta Lake medallion,
-quality and output checks, a dbt/DuckDB validation layer, anomaly reporting,
-local MinIO support, hosted B2 automation, and repo-owned report artifacts.
+The system has four API ingestors, a Delta Lake medallion, quality and output
+checks, a dbt/DuckDB validation layer, anomaly reporting, a generated daily
+brief, local MinIO support, hosted B2 automation, and a report published to
+GitHub Pages.
 
 ```mermaid
 flowchart TD
     OM["Open-Meteo<br/>12 city grid points"]
     OA["OpenAQ v3<br/>daily station aggregates"]
     WQ["WAQI<br/>current station readings"]
+    OW["Open-Meteo ERA5<br/>daily weather"]
 
     BO["Bronze openmeteo"]
     BA["Bronze openaq"]
     BW["Bronze waqi"]
+    BX["Bronze openmeteo_weather"]
     SI["Silver air_quality<br/>canonical schema"]
+    SX["Silver weather"]
     GD["Gold daily_country_summary"]
     GW["Gold wildfire_risk_index"]
     GA["Gold anomaly_alerts"]
+    GX["Gold daily_country_weather<br/>heat and cold alerts"]
+    AI["AI brief<br/>Gemini"]
     Q["Quality and output contracts"]
     DBT["dbt / DuckDB<br/>MinIO-backed CI"]
     GC["Grafana Cloud<br/>best-effort remote_write"]
@@ -27,6 +33,9 @@ flowchart TD
     OM --> BO
     OA --> BA
     WQ --> BW
+    OW --> BX
+    BX --> SX
+    SX --> GX
     BO & BA & BW --> SI
     SI --> GD
     SI --> GW
@@ -35,7 +44,8 @@ flowchart TD
     GD & GW & GA --> Q
     SI --> DBT
     BO & BA & BW & SI & GD & GW & GA & Q --> GC
-    GD & GW & GA --> RP
+    GD & GW & GA & GX --> AI
+    GD & GW & GA & GX & AI --> RP
 ```
 
 Backblaze B2 is the hosted object store. MinIO provides the same S3-compatible
@@ -48,13 +58,16 @@ boundary for local development and CI.
 | Bronze Open-Meteo | `data/ingestion/bronze/copernicus_ingestor.py` | Daily PM2.5, PM10, NO2, and O3 means for 12 CAMS-backed grid points. |
 | Bronze OpenAQ | `data/ingestion/bronze/openaq_ingestor.py` | OpenAQ v3 locations and sensor daily aggregates with a per-country cap. |
 | Bronze WAQI | `data/ingestion/bronze/waqi_ingestor.py` | Current readings for 15 city searches. A token is required. |
+| Bronze weather | `data/ingestion/bronze/weather_ingestor.py` | Open-Meteo ERA5 daily weather for the same 12 grid points. |
 | Silver | `data/ingestion/silver/transformer.py` | Types, bounds, WHO flags, AQI category, completeness, and canonical columns. |
-| Gold marts | `data/ingestion/gold/marts.py` | Country summaries and the wildfire risk index. |
+| Silver weather | `data/ingestion/silver/weather.py` | Condition, wind and dust labels for each station and day. |
+| Gold marts | `data/ingestion/gold/marts.py` | Country summaries, the wildfire risk index, and daily country weather with heat and cold alerts. |
 | Gold anomaly | `data/ingestion/gold/anomaly.py` | Isolation Forest on concentration-compatible Open-Meteo and OpenAQ rows. |
 | Quality | `data/quality/run_checks.py` | Great Expectations checks for requested Bronze and Silver partitions. |
 | Output verification | `data/quality/verify_outputs.py` | Gold schema, value-domain, source, and requested-date contracts. |
 | dbt | `data/dbt/` | DuckDB models compiled and executed against MinIO in CI. |
-| Report | `docs/pipeline_report.ipynb` | Reads Gold, writes the HTML report, readiness CSV, and six charts. |
+| AI brief | `data/reporting/ai_brief.py` | Anomaly fact-check, country briefings, and the seasonal spotlight from Gemini. |
+| Report | `docs/pipeline_report.ipynb` | Reads Gold, writes the HTML report, readiness CSV, and eight charts. The weather chart follows the season set in `data/reporting/season.py`. |
 
 The scheduled workflow runs daily at 06:00 UTC and defaults to yesterday. A
 manual run can target one date or a date range. OpenAQ range ingestion queries
@@ -67,10 +80,18 @@ each sensor once for the requested range.
 | Bronze | `s3://{bronze_bucket}/openmeteo/air_quality` | `partition_date` |
 | Bronze | `s3://{bronze_bucket}/openaq/air_quality` | `partition_date` |
 | Bronze | `s3://{bronze_bucket}/waqi/air_quality` | `partition_date` |
+| Bronze | `s3://{bronze_bucket}/openmeteo_weather/weather` | `partition_date` |
 | Silver | `s3://{silver_bucket}/air_quality` | `partition_date`, `source` |
-| Gold | `s3://{gold_bucket}/daily_country_summary` | full-table overwrite |
-| Gold | `s3://{gold_bucket}/wildfire_risk_index` | full-table overwrite |
-| Gold | `s3://{gold_bucket}/anomaly_alerts` | full-table overwrite |
+| Silver | `s3://{silver_bucket}/weather` | `partition_date`, `source` |
+| Gold | `s3://{gold_bucket}/daily_country_summary` | rolling window |
+| Gold | `s3://{gold_bucket}/wildfire_risk_index` | rolling window |
+| Gold | `s3://{gold_bucket}/anomaly_alerts` | rolling window |
+| Gold | `s3://{gold_bucket}/daily_country_weather` | rolling window |
+
+Each Gold run reads the latest 60 days of Silver and rewrites the latest 14
+days of each table, keeping older rows as they are. `GOLD_WINDOW_DAYS=all`
+rebuilds in full, which a backfill needs. The logic is in
+`data/ingestion/gold/window.py`.
 
 Every retained Delta writer attempts `create_checkpoint()` after writing.
 Checkpoint failures are logged as non-fatal, but normal successful writes keep
@@ -126,6 +147,5 @@ under `grafana/`.
 | `ci-infra.yml` | Prometheus rules/config and Alertmanager validation. |
 | `cd-deploy.yml` | Builds and publishes commit-SHA, branch, and latest GHCR images. |
 | `pipeline-run.yml` | Runs the real B2 pipeline and verifies requested outputs. |
-| `update-report.yml` | Executes the notebook and commits refreshed report artifacts. |
-| `pages.yml` | Publishes the committed report through GitHub Pages. |
+| `update-report.yml` | Writes the AI brief, executes the notebook, and publishes the report to GitHub Pages after each successful pipeline run. |
 | `verify-secrets.yml` | Manual, read-only B2 and Grafana credential probes. |
