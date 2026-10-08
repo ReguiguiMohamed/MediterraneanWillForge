@@ -18,10 +18,12 @@ model rather than the whole section:
      own Gold aggregates for the day: pollutants from daily_country_summary,
      temperature, conditions and heat alerts from daily_country_weather.
 
-  3. A paragraph on whichever country was hottest today: what that heat does to
-     people, and whether it arrived gradually or as a swing. Every figure in it,
-     including the size of each swing, is computed here and handed over rather
-     than left to the model to read off a list.
+  3. A paragraph on the country leading today's seasonal story: the hottest in
+     summer, the coldest in winter, the wettest in autumn, the dustiest in
+     spring, or whichever is inside a heatwave or cold wave right now. The
+     season and the ranking come from data/reporting/season.py. Every figure in
+     the paragraph, including the size of each swing, is computed here and
+     handed over rather than left to the model to read off a list.
 
 Why Gemini: it is the only provider whose free tier includes real search
 grounding. Flash text tokens are free, and 2.5 Flash allows 500 grounded
@@ -50,6 +52,7 @@ from data.reporting.analytics import (
     filter_anomaly_model_sources,
     filter_report_countries,
 )
+from data.reporting.season import focus_for, rank_countries, season_of
 from data.storage import read_delta
 
 # A ladder per job, tried in order, first model that answers wins. Free-tier
@@ -70,15 +73,15 @@ from data.storage import read_delta
 BRIEFING_MODELS = ("gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite")
 SEARCH_MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite")
 
-# The heat note is the one ladder that runs cheapest-first rather than
+# The spotlight is the one ladder that runs cheapest-first rather than
 # best-first. It is a single paragraph over a dozen numbers that are already
 # computed, which the smallest model does perfectly well, and starting at the
 # bottom keeps it out of the 20-a-day free quota that gemini-3.7-flash rations
 # and the briefings actually need.
 SPOTLIGHT_MODELS = ("gemini-2.5-flash-lite", "gemini-2.5-flash")
 
-# Days of history behind the hottest country's note. Long enough to show a
-# swing building, short enough that the model is reading a handful of numbers.
+# Days of history behind the spotlight note. Long enough to show a swing
+# building, short enough that the model is reading a handful of numbers.
 SPOTLIGHT_DAYS = 10
 
 _HEAT_ALERTS = {"heat_advisory", "heatwave", "extreme_heatwave"}
@@ -129,30 +132,59 @@ Rules:
 Answer with bare JSON and nothing else, no markdown fence, no preamble:
 {"briefings": [{"country_code": "XX", "briefing": "..."}]}"""
 
-_HEAT_RISK_SYSTEM = """You write a short heat-risk note for a public weather and air-quality dashboard.
+_SPOTLIGHT_SYSTEM = """You write a short weather-risk note for a public weather and air-quality dashboard.
 
-You are given the recent daily temperatures for whichever country was hottest
-today, its heat and cold alerts, and the size of the swings between those days.
+You are given the recent daily weather for one country, picked because it leads
+today on the measure named in the input, plus its heat and cold alerts and the
+size of the swings between those days.
 
 Write one paragraph, three to five sentences.
 
 Rules:
-- Name the country and today's high in Celsius. Use only figures you were given.
-- Say what heat at that level does to people, in general and well-established
-  terms: who feels it first, what sustained heat costs a body, why a night that
-  stays warm matters as much as the afternoon. No diagnosis, no treatment, and
-  nothing addressed to an individual reader as advice.
+- Name the country and today's figure for that measure. Use only figures you
+  were given.
+- {focus}
 - Cover the swing as well as the level. A large jump between two days, a wide
   spread across the window, or a flip between heat and cold alerts is worth
   naming, because a body adapts to gradual change and not to a sudden one.
 - Alert levels mean: heat_advisory, one or two days above that station's own
   recent normal; heatwave, three or more in a row; extreme_heatwave, three or
-  more with a high at or above 40 C. The cold alerts mirror them.
-- If there is no alert and no notable swing, say so plainly. The warmest country
+  more with a high at or above 40 C. The cold alerts mirror them, with
+  severe_cold_wave at or below 0 C.
+- If there is no alert and nothing notable, say so plainly. The leading country
   on an ordinary day is an ordinary finding, not a story.
-- Plain and factual. No alarm, no reassurance, no instructions.
+- Plain and factual. No alarm, no reassurance, no instructions, nothing
+  addressed to an individual reader as advice.
 
 Return the paragraph as plain text. No heading, no markdown, no preamble."""
+
+# What each focus asks the model to explain, in general and well-established
+# terms.
+_SPOTLIGHT_FOCUS = {
+    "heat": (
+        "Say what heat at that level does to people: who feels it first, what "
+        "sustained heat costs a body, why a night that stays warm matters as "
+        "much as the afternoon. No diagnosis, no treatment."
+    ),
+    "cold": (
+        "Say what cold at that level does to people: who feels it first, why "
+        "several cold days in a row cost more than one, why a night below "
+        "freezing matters for homes that are hard to heat. No diagnosis, no "
+        "treatment."
+    ),
+    "rain": (
+        "Say what that much rain means on the ground: heavy rain on dry ground "
+        "runs off instead of soaking in, which is how Mediterranean flash floods "
+        "start, and one day's total matters more than the window's. If the "
+        "window was dry, say that instead."
+    ),
+    "dust": (
+        "Say what Saharan dust at that level does: fine particles reach deep "
+        "into the lungs, people with asthma or heart and lung conditions feel "
+        "it first, and it often arrives on a warm southerly wind. If dust was "
+        "low, say that instead."
+    ),
+}
 
 _BRIEFING_SCHEMA = {
     "type": "object",
@@ -196,6 +228,10 @@ def _client():
 
 def _round(value, digits: int = 1):
     return None if pd.isna(value) else round(float(value), digits)
+
+
+def _days(value) -> int:
+    return 0 if value is None or pd.isna(value) else int(value)
 
 
 def _is_rate_limited(exc: BaseException) -> bool:
@@ -383,13 +419,13 @@ def weather_by_country(weather: pd.DataFrame | None) -> dict[str, dict]:
     return lookup
 
 
-def temperature_profile(
+def weather_profile(
     history: pd.DataFrame,
     country: str,
     latest_date: str,
     days: int = SPOTLIGHT_DAYS,
 ) -> dict | None:
-    """One country's recent temperatures, and the swings worth naming.
+    """One country's recent weather, and the swings worth naming.
 
     The swings are measured here rather than left to the model. Asking it to
     eyeball a jump from a list is asking it to do arithmetic it is not reliably
@@ -422,8 +458,9 @@ def temperature_profile(
         "low_c": _round(latest["temp_min_c"]),
         "day_night_range_c": _round(highs.iloc[-1] - lows.iloc[-1]),
         "heat_alert": latest.get("heat_alert"),
-        "heat_streak_days": int(pd.to_numeric(latest.get("heat_streak_days")) or 0),
+        "heat_streak_days": _days(latest.get("heat_streak_days")),
         "cold_alert": latest.get("cold_alert"),
+        "cold_streak_days": _days(latest.get("cold_streak_days")),
         "condition": latest.get("condition"),
         "window_highest_c": _round(highs.max()),
         "window_lowest_c": _round(lows.min()),
@@ -433,16 +470,33 @@ def temperature_profile(
         "swung_between_heat_and_cold": bool(
             (alerts & _HEAT_ALERTS) and (alerts & _COLD_ALERTS)
         ),
-        "days": [
-            {
-                "date": str(row["partition_date"]),
-                "high_c": _round(row["temp_max_c"]),
-                "low_c": _round(row["temp_min_c"]),
-                "heat_alert": row.get("heat_alert"),
-            }
-            for _, row in rows.iterrows()
-        ],
     }
+
+    if "precipitation_mm" in rows:
+        rain = pd.to_numeric(rows["precipitation_mm"], errors="coerce")
+        profile["rain_today_mm"] = _round(rain.iloc[-1])
+        profile["window_rain_total_mm"] = _round(rain.sum())
+        profile["window_wettest_day_mm"] = _round(rain.max())
+    if "dust" in rows:
+        dust = pd.to_numeric(rows["dust"], errors="coerce")
+        profile["dust_today"] = _round(dust.iloc[-1])
+        profile["window_dust_peak"] = _round(dust.max())
+
+    profile["days"] = [
+        {
+            "date": str(row["partition_date"]),
+            "high_c": _round(row["temp_max_c"]),
+            "low_c": _round(row["temp_min_c"]),
+            **{
+                key: _round(row[column])
+                for key, column in (("rain_mm", "precipitation_mm"), ("dust", "dust"))
+                if column in row
+            },
+            "heat_alert": row.get("heat_alert"),
+            "cold_alert": row.get("cold_alert"),
+        }
+        for _, row in rows.iterrows()
+    ]
 
     steps = highs.diff()
     if steps.notna().any():
@@ -453,37 +507,38 @@ def temperature_profile(
     return profile
 
 
-def heat_spotlight(
+def weather_spotlight(
     history: pd.DataFrame | None, client, latest_date: str
 ) -> dict | None:
-    """A paragraph on the hottest country's heat risk and its swings."""
+    """A paragraph on the country leading today's seasonal weather story."""
     if history is None or history.empty:
         return None
 
-    day = history[history["partition_date"].astype(str) == str(latest_date)]
-    highs = pd.to_numeric(day["temp_max_c"], errors="coerce") if not day.empty else None
-    if highs is None or not highs.notna().any():
-        logger.warning("No temperatures for the latest date — skipping the heat note.")
+    focus = focus_for(history, latest_date)
+    ranking = rank_countries(history, focus, str(latest_date))
+    if ranking.empty:
+        logger.warning(f"No {focus.column} for {latest_date}, skipping the spotlight.")
         return None
 
-    country = day.loc[highs.idxmax(), "country_code"]
-    profile = temperature_profile(history, country, latest_date)
+    country = ranking.index[0]
+    profile = weather_profile(history, country, latest_date)
     if profile is None:
         return None
 
-    logger.info(
-        f"Heat note for {country}, {profile['high_c']} C, "
-        f"alert={profile['heat_alert']}."
-    )
+    season = season_of(latest_date)
+    measure = focus.measure
+    value = _round(ranking.iloc[0])
+    logger.info(f"Spotlight on {country}, {season}, {measure}: {value}.")
 
     model, paragraph = _first_working(
         client,
         SPOTLIGHT_MODELS,
         lambda interaction: (interaction.output_text or "").strip(),
-        system_instruction=_HEAT_RISK_SYSTEM,
+        system_instruction=_SPOTLIGHT_SYSTEM.format(focus=_SPOTLIGHT_FOCUS[focus.name]),
         input=(
-            "Temperatures are Celsius. This country had the highest daily high "
-            "of any country covered today.\n\n" + json.dumps(profile, indent=2)
+            f"Season: {season}. Temperatures are Celsius, rain mm, dust ug/m3. "
+            f"Of every country covered, this one had the {measure}: "
+            f"{value} {focus.unit}.\n\n" + json.dumps(profile, indent=2)
         ),
     )
     if not paragraph:
@@ -492,6 +547,11 @@ def heat_spotlight(
     return {
         "country_code": country,
         "date": profile["date"],
+        "season": season,
+        "focus": focus.name,
+        "measure": measure,
+        "value": value,
+        "unit": focus.unit,
         "model": model,
         "paragraph": paragraph,
         "figures": profile,
@@ -580,8 +640,8 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
     # Weather is a whole Gold table younger than the rest, and a day where it
     # failed to land should still get an air-quality brief. Read it defensively
     # and let an absence be an absence.
-    # The whole table, not just today: the heat note needs the days behind the
-    # hottest one to say whether the heat arrived gradually or all at once.
+    # The whole table, not just today: the spotlight needs the days behind the
+    # latest one to say whether the weather turned gradually or all at once.
     try:
         weather_history = filter_report_countries(
             read_delta(f"s3://{gold}/daily_country_weather")
@@ -596,7 +656,7 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         "model": None,
         "date": latest_date,
         "fact_check": None,
-        "heat_spotlight": None,
+        "weather_spotlight": None,
         "briefings": [],
     }
 
@@ -632,9 +692,11 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         logger.warning(f"Anomaly fact-check failed (non-fatal): {exc}")
 
     try:
-        brief["heat_spotlight"] = heat_spotlight(weather_history, client, latest_date)
+        brief["weather_spotlight"] = weather_spotlight(
+            weather_history, client, latest_date
+        )
     except Exception as exc:
-        logger.warning(f"Heat note failed (non-fatal): {exc}")
+        logger.warning(f"Spotlight note failed (non-fatal): {exc}")
 
     try:
         model, brief["briefings"] = country_briefings(latest, client, weather)
@@ -643,14 +705,14 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         brief["model"] = (
             model
             or (brief["fact_check"] or {}).get("model")
-            or (brief["heat_spotlight"] or {}).get("model")
+            or (brief["weather_spotlight"] or {}).get("model")
         )
     except Exception as exc:
         logger.warning(f"Country briefings failed (non-fatal): {exc}")
 
     if (
         brief["fact_check"] is None
-        and brief["heat_spotlight"] is None
+        and brief["weather_spotlight"] is None
         and not brief["briefings"]
     ):
         logger.warning("AI brief produced nothing — not writing a file.")
@@ -663,7 +725,7 @@ def run(output_path: str | Path = "docs/ai_brief.json") -> None:
         f"AI brief written: {len(brief['briefings'])} briefing(s) "
         f"via {brief['model'] or 'no model'}, "
         f"fact-check={'yes' if brief['fact_check'] else 'no'}, "
-        f"heat-note={'yes' if brief['heat_spotlight'] else 'no'} -> {out}"
+        f"spotlight={'yes' if brief['weather_spotlight'] else 'no'} -> {out}"
     )
 
 

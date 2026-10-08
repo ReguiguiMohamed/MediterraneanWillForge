@@ -372,7 +372,7 @@ def test_unreadable_gold_skips_the_brief_instead_of_raising(tmp_path, monkeypatc
     assert not out.exists()
 
 
-# ── Heat-risk note ─────────────────────────────────────────────────────────────
+# ── Seasonal spotlight ────────────────────────────────────────────────────────
 
 
 def _weather_history():
@@ -410,12 +410,13 @@ def _weather_history():
 
 
 def test_profile_measures_the_swing_rather_than_leaving_it_to_the_model():
-    profile = ai_brief.temperature_profile(_weather_history(), "TN", "2026-08-19")
+    profile = ai_brief.weather_profile(_weather_history(), "TN", "2026-08-19")
 
     assert profile["high_c"] == 44.0
     assert profile["days_of_history"] == 10
-    assert profile["window_high_spread_c"] == 16.0  # 44.0 - 28.0
-    assert profile["biggest_day_to_day_change_c"] == 7.0  # 34.0 -> 41.0
+    # 44.0 C less 28.0 C, and the jump from 34.0 C to 41.0 C.
+    assert profile["window_high_spread_c"] == 16.0
+    assert profile["biggest_day_to_day_change_c"] == 7.0
     assert profile["biggest_change_on"] == "2026-08-16"
     assert profile["day_night_range_c"] == 12.0
     assert profile["heat_alert"] == "extreme_heatwave"
@@ -429,15 +430,15 @@ def test_profile_flags_a_flip_between_heat_and_cold():
         "cold_alert",
     ] = "cold_wave"
 
-    flipped = ai_brief.temperature_profile(history, "TN", "2026-08-19")
-    steady = ai_brief.temperature_profile(_weather_history(), "TN", "2026-08-19")
+    flipped = ai_brief.weather_profile(history, "TN", "2026-08-19")
+    steady = ai_brief.weather_profile(_weather_history(), "TN", "2026-08-19")
 
     assert flipped["swung_between_heat_and_cold"] is True
     assert steady["swung_between_heat_and_cold"] is False
 
 
 def test_profile_ignores_days_after_the_reporting_date():
-    profile = ai_brief.temperature_profile(_weather_history(), "TN", "2026-08-14")
+    profile = ai_brief.weather_profile(_weather_history(), "TN", "2026-08-14")
 
     assert profile["date"] == "2026-08-14"
     assert profile["high_c"] == 33.0
@@ -446,7 +447,7 @@ def test_profile_ignores_days_after_the_reporting_date():
 def test_spotlight_picks_the_hottest_country_and_starts_on_the_cheapest_model():
     client = _Client(_interaction("Tunisia reached 44.0 C today."))
 
-    out = ai_brief.heat_spotlight(_weather_history(), client, "2026-08-19")
+    out = ai_brief.weather_spotlight(_weather_history(), client, "2026-08-19")
 
     assert out["country_code"] == "TN"
     assert out["paragraph"] == "Tunisia reached 44.0 C today."
@@ -461,7 +462,7 @@ def test_spotlight_picks_the_hottest_country_and_starts_on_the_cheapest_model():
 def test_spotlight_gives_the_model_only_computed_figures():
     client = _Client(_interaction("A paragraph."))
 
-    ai_brief.heat_spotlight(_weather_history(), client, "2026-08-19")
+    ai_brief.weather_spotlight(_weather_history(), client, "2026-08-19")
 
     sent = json.loads(client.calls[0]["input"].split("\n\n", 1)[1])
     assert sent["country_code"] == "TN"
@@ -474,18 +475,77 @@ def test_spotlight_skips_a_day_with_no_temperatures():
     history["temp_max_c"] = None
 
     assert (
-        ai_brief.heat_spotlight(history, _Client(_interaction("x")), "2026-08-19")
+        ai_brief.weather_spotlight(history, _Client(_interaction("x")), "2026-08-19")
         is None
     )
 
 
 def test_spotlight_skips_when_there_is_no_weather_at_all():
     assert (
-        ai_brief.heat_spotlight(None, _Client(_interaction("x")), "2026-08-19") is None
+        ai_brief.weather_spotlight(None, _Client(_interaction("x")), "2026-08-19")
+        is None
     )
     assert (
-        ai_brief.heat_spotlight(
+        ai_brief.weather_spotlight(
             pd.DataFrame(), _Client(_interaction("x")), "2026-08-19"
         )
         is None
     )
+
+
+def _in_month(history, month, **columns):
+    """The same ten days moved to another month, alerts cleared unless given."""
+    moved = history.copy()
+    moved["partition_date"] = moved["partition_date"].str.replace("-08-", month)
+    moved["heat_alert"] = "none"
+    moved["heat_streak_days"] = 0
+    return moved.assign(**columns)
+
+
+def test_winter_spotlight_picks_the_coldest_night():
+    client = _Client(_interaction("A paragraph."))
+    history = _in_month(_weather_history(), "-01-")
+
+    out = ai_brief.weather_spotlight(history, client, "2026-01-19")
+
+    # GR's low of 20.0 C beats TN's 32.0 C on the latest day.
+    assert out["country_code"] == "GR"
+    assert out["season"] == "winter"
+    assert out["focus"] == "cold"
+    assert out["measure"] == "lowest daily low today"
+    assert out["value"] == 20.0
+
+
+def test_autumn_spotlight_ranks_rain_over_ten_days():
+    client = _Client(_interaction("A paragraph."))
+    history = _in_month(_weather_history(), "-10-")
+    # GR takes one 30 mm storm early on, TN a steady 2 mm a day.
+    history["precipitation_mm"] = 2.0
+    history.loc[
+        (history["country_code"] == "GR") & (history["partition_date"] == "2026-10-11"),
+        "precipitation_mm",
+    ] = 30.0
+    history.loc[
+        (history["country_code"] == "GR") & (history["partition_date"] != "2026-10-11"),
+        "precipitation_mm",
+    ] = 0.0
+
+    out = ai_brief.weather_spotlight(history, client, "2026-10-19")
+
+    assert out["country_code"] == "GR"
+    assert out["focus"] == "rain"
+    assert out["value"] == 3.0
+    assert out["figures"]["window_wettest_day_mm"] == 30.0
+    assert "Season: autumn." in client.calls[0]["input"]
+
+
+def test_an_active_heatwave_outranks_the_season():
+    client = _Client(_interaction("A paragraph."))
+    history = _in_month(_weather_history(), "-10-", precipitation_mm=0.0)
+    history.loc[history["country_code"] == "TN", "heat_alert"] = "heatwave"
+
+    out = ai_brief.weather_spotlight(history, client, "2026-10-19")
+
+    assert out["season"] == "autumn"
+    assert out["focus"] == "heat"
+    assert out["country_code"] == "TN"
