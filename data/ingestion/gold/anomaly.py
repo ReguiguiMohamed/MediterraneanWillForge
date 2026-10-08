@@ -3,8 +3,8 @@ data/ingestion/gold/anomaly.py
 ──────────────────────────────
 Silver → Gold anomaly detection layer.
 
-Runs an Isolation Forest over the full Silver history to flag stations
-and dates where PM2.5 or O3 readings deviate significantly from the
+Runs an Isolation Forest over the latest 60 days of Silver to flag stations
+and dates where PM2.5, O3 or NO2 readings deviate significantly from the
 observed distribution. Results are written to a Gold Delta table at:
 
     s3://{gold_bucket}/anomaly_alerts
@@ -29,7 +29,8 @@ Model details
 ─────────────
 Features:  pm2_5, ozone, nitrogen_dioxide (non-null rows only)
 Algorithm: sklearn IsolationForest, contamination=0.05
-Training:  full Silver history on each run (table rebuilt with overwrite)
+Training:  the latest 60 days of Silver on each run. The newest 14 days
+       of flags are rewritten and older rows kept (see window.py).
 Sources:   openmeteo and openaq only. WAQI IAQI values are index values,
             not concentration measurements, so they are excluded here.
 
@@ -56,8 +57,10 @@ from data.storage import delta_storage_options
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 _FEATURES = ["pm2_5", "ozone", "nitrogen_dioxide"]
-_CONTAMINATION = 0.05  # expect ~5 % of readings to be anomalous
-_MIN_ROWS = 10  # skip model fit if Silver has fewer rows than this
+# About 5% of readings are expected to be anomalous.
+_CONTAMINATION = 0.05
+# Below this many usable rows the fit is skipped.
+_MIN_ROWS = 10
 _MODEL_SOURCES = {"openmeteo", "openaq"}
 
 
@@ -140,8 +143,9 @@ def run(silver_df: pd.DataFrame | None = None) -> None:
     )
     model.fit(X)
 
-    scores = model.score_samples(X)  # lower = more anomalous
-    labels = model.predict(X)  # -1 = anomaly, 1 = normal
+    # A lower score is more anomalous. predict() returns -1 for an anomaly.
+    scores = model.score_samples(X)
+    labels = model.predict(X)
 
     # ── Build output DataFrame ─────────────────────────────────────────────────
     result = feat_df[
