@@ -1,0 +1,18 @@
+# A clean day resets the streak, and the next exceedance starts again at 1.
+test_streak_resets_after_a_clean_day:
+  model: marts.mart_who_exceedance_streak
+  inputs:
+    staging.stg_air_quality:
+      rows:
+        - {station_id: tn-1, station_name: Tunis, country_code: TN, source: openmeteo, observation_date: 2026-06-01, who_pm25_exceed: 1, who_pm10_exceed: 0, who_no2_exceed: 0, who_o3_exceed: 0}
+        - {station_id: tn-1, station_name: Tunis, country_code: TN, source: openmeteo, observation_date: 2026-06-02, who_pm25_exceed: 0, who_pm10_exceed: 1, who_no2_exceed: 0, who_o3_exceed: 0}
+        - {station_id: tn-1, station_name: Tunis, country_code: TN, source: openmeteo, observation_date: 2026-06-03, who_pm25_exceed: 0, who_pm10_exceed: 0, who_no2_exceed: 0, who_o3_exceed: 0}
+        - {station_id: tn-1, station_name: Tunis, country_code: TN, source: openmeteo, observation_date: 2026-06-04, who_pm25_exceed: 0, who_pm10_exceed: 0, who_no2_exceed: 0, who_o3_exceed: 1}
+  outputs:
+    query:
+      partial: true
+      rows:
+        - {observation_date: 2026-06-01, station_id: tn-1, has_who_exceedance: 1, current_exceedance_streak_days: 1}
+        - {observation_date: 2026-06-02, station_id: tn-1, has_who_exceedance: 1, current_exceedance_streak_days: 2}
+        - {observation_date: 2026-06-03, station_id: tn-1, has_who_exceedance: 0, current_exceedance_streak_days: 0}
+        - {observation_date: 2026-06-04, station_id: tn-1, has_who_exceedance: 1, current_exceedance_streak_days: 1}

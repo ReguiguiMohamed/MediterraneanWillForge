@@ -2,7 +2,7 @@
 CI verification script: assert Silver Delta table has rows after transformer run.
 
 Fails with a clear message if Silver is empty or unreadable, so the CI job fails
-at this step rather than silently passing through to dbt.
+at this step rather than silently passing through to SQLMesh.
 
 Exits via os._exit. delta-rs shuts its Rust runtime down during interpreter
 finalization, and that teardown intermittently aborts the process:

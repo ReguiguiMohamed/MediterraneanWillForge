@@ -1,4 +1,4 @@
-.PHONY: help up down ingest-openmeteo ingest-openaq ingest-waqi ingest-bronze ingest-silver ingest-gold ingest-anomaly ingest quality test test-unit test-integration lint format dbt-compile dbt-run validate monitoring-up monitoring-down clean
+.PHONY: help up down ingest-openmeteo ingest-openaq ingest-waqi ingest-bronze ingest-silver ingest-gold ingest-anomaly ingest quality test test-unit test-integration lint format sqlmesh-test sqlmesh-plan validate monitoring-up monitoring-down clean
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -66,18 +66,16 @@ format: ## Format Python code
 	black data/ tests/
 	ruff check --fix data/ tests/
 
-# dbt (isolated environment — pinned pathspec conflicts with Black 26)
-dbt-compile: .dbt-venv/bin/dbt ## Compile dbt models without reading lake data
-	.dbt-venv/bin/dbt compile --profiles-dir data/dbt --project-dir data/dbt
+# SQLMesh (isolated environment, it pins its own sqlglot)
+sqlmesh-test: .sqlmesh-venv/bin/sqlmesh ## Run SQLMesh unit tests without reading lake data
+	.sqlmesh-venv/bin/sqlmesh -p data/sqlmesh test
 
-dbt-run: .dbt-venv/bin/dbt ## Run and test dbt models against configured MinIO Silver data
-	.dbt-venv/bin/dbt run --profiles-dir data/dbt --project-dir data/dbt
-	.dbt-venv/bin/dbt test --profiles-dir data/dbt --project-dir data/dbt
+sqlmesh-plan: .sqlmesh-venv/bin/sqlmesh ## Build and audit SQLMesh models from MinIO Silver data
+	.sqlmesh-venv/bin/sqlmesh -p data/sqlmesh plan --auto-apply --no-prompts
 
-.dbt-venv/bin/dbt: requirements-dbt.txt
-	python -m venv .dbt-venv
-	.dbt-venv/bin/python -m pip install --upgrade pip
-	.dbt-venv/bin/pip install -r requirements-dbt.txt
+.sqlmesh-venv/bin/sqlmesh: requirements-sqlmesh.txt
+	python -m venv .sqlmesh-venv
+	.sqlmesh-venv/bin/pip install -r requirements-sqlmesh.txt
 
 # Configuration
 validate: ## Validate base and local Compose configuration

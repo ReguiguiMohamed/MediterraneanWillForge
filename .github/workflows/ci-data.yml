@@ -55,17 +55,14 @@ jobs:
           pytest tests/unit/ -v --tb=short \
             --cov=data --cov-report=xml --cov-report=term-missing
 
-      - name: Install dbt in an isolated environment
+      - name: Install SQLMesh in an isolated environment
         run: |
-          python -m venv .dbt-venv
-          .dbt-venv/bin/python -m pip install --upgrade pip
-          .dbt-venv/bin/pip install -r requirements-dbt.txt
+          python -m venv .sqlmesh-venv
+          .sqlmesh-venv/bin/pip install -r requirements-sqlmesh.txt
 
-      - name: dbt compile (SQL syntax check — no data required)
-        run: |
-          .dbt-venv/bin/dbt compile \
-            --profiles-dir data/dbt \
-            --project-dir data/dbt
+      # Unit tests run the models on fixture rows in DuckDB, no lake needed.
+      - name: SQLMesh unit tests
+        run: .sqlmesh-venv/bin/sqlmesh -p data/sqlmesh test
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -204,7 +201,7 @@ jobs:
         run: aws --endpoint-url http://localhost:9000 s3 ls --recursive s3://silver/air_quality/ | head -20
 
       - name: Verify Silver layer has rows
-        # Fails loudly here rather than letting dbt silently report "no files found".
+        # Fails loudly here rather than letting SQLMesh read an empty glob.
         env:
           MINIO_ENDPOINT:   http://localhost:9000
           MINIO_ACCESS_KEY: minioadmin
@@ -242,22 +239,11 @@ jobs:
           MINIO_BUCKET_GOLD: gold
         run: python -m data.quality.verify_outputs
 
-      - name: Install dbt in an isolated environment
+      - name: Install SQLMesh in an isolated environment
         run: |
-          python -m venv .dbt-venv
-          .dbt-venv/bin/python -m pip install --upgrade pip
-          .dbt-venv/bin/pip install -r requirements-dbt.txt
+          python -m venv .sqlmesh-venv
+          .sqlmesh-venv/bin/pip install -r requirements-sqlmesh.txt
 
-      - name: dbt run + test (Silver → dbt views/tables)
-        env:
-          MINIO_HOST:        localhost:9000
-          MINIO_ACCESS_KEY:  minioadmin
-          MINIO_SECRET_KEY:  minioadmin
-          DBT_DUCKDB_PATH:   /tmp/med_ops_dbt.duckdb
-        run: |
-          .dbt-venv/bin/dbt run \
-            --profiles-dir data/dbt \
-            --project-dir data/dbt
-          .dbt-venv/bin/dbt test \
-            --profiles-dir data/dbt \
-            --project-dir data/dbt
+      # Builds every model from MinIO Silver. A failed audit fails the plan.
+      - name: SQLMesh plan and audits (Silver to DuckDB marts)
+        run: .sqlmesh-venv/bin/sqlmesh -p data/sqlmesh plan --auto-apply --no-prompts

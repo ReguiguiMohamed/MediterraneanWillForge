@@ -106,7 +106,7 @@ OpenAQ --------------------+
 WAQI ----------------------/
                          |
                          +--> quality checks
-                         +--> dbt/DuckDB in MinIO CI
+                         +--> SQLMesh/DuckDB in MinIO CI
                          +--> Grafana Cloud metrics (best effort)
 
 Hosted lake: Backblaze B2        Local and CI lake: MinIO
@@ -236,7 +236,7 @@ make test-integration          # MinIO, no public API calls
 ```
 
 CI also builds both images, runs Silver and Gold against MinIO, checks the Gold
-output contracts, runs dbt, and validates the Prometheus and Alertmanager config.
+output contracts, runs SQLMesh, and validates the Prometheus and Alertmanager config.
 
 ## Layout
 
@@ -245,7 +245,7 @@ output contracts, runs dbt, and validates the Prometheus and Alertmanager config
 data/ingestion/      Bronze, Silver, and Gold jobs
 data/quality/        Bronze and Silver checks, Gold contract runner
 data/contracts/      Gold data contracts (ODCS, run by datacontract-cli)
-data/dbt/            DuckDB models and tests
+data/sqlmesh/        SQLMesh models, audits and unit tests on DuckDB
 data/reporting/      report analytics and the AI brief
 docker/              job images and the local Compose stack
 monitoring/          local Prometheus and Alertmanager config
@@ -264,7 +264,7 @@ tests/               unit and MinIO integration tests
 - Gold reads a 60-day window of Silver and rewrites its last 14 days, so a
   partition that lands more than two weeks late needs a backfill run to reach
   Gold. Backfills pass `GOLD_WINDOW_DAYS=all` and rebuild in full.
-- dbt runs against MinIO in CI only, never in the scheduled B2 pipeline.
+- SQLMesh runs against MinIO in CI only, never in the scheduled B2 pipeline.
 - The AI brief is generated text. It is grounded in the pipeline's numbers and
   cites sources, but it is not a substitute for reading the data.
 - Hosted runs need B2 and WAQI secrets. Grafana and `GEMINI_API_KEY` are optional.

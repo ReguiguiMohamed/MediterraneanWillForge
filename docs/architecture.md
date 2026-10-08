@@ -3,7 +3,7 @@
 ## Boundary
 
 The system has four API ingestors, a Delta Lake medallion, quality and output
-checks, a dbt/DuckDB validation layer, anomaly reporting, a generated daily
+checks, a SQLMesh/DuckDB validation layer, anomaly reporting, a generated daily
 brief, local MinIO support, hosted B2 automation, and a report published to
 GitHub Pages.
 
@@ -26,7 +26,7 @@ flowchart TD
     GX["Gold daily_country_weather<br/>heat and cold alerts"]
     AI["AI brief<br/>Gemini"]
     Q["Quality and output contracts"]
-    DBT["dbt / DuckDB<br/>MinIO-backed CI"]
+    DBT["SQLMesh / DuckDB<br/>MinIO-backed CI"]
     GC["Grafana Cloud<br/>best-effort remote_write"]
     RP["Notebook, HTML, CSV, PNGs<br/>GitHub Pages"]
 
@@ -65,7 +65,7 @@ boundary for local development and CI.
 | Gold anomaly | `data/ingestion/gold/anomaly.py` | Isolation Forest on concentration-compatible Open-Meteo and OpenAQ rows. |
 | Quality | `data/quality/run_checks.py` | Great Expectations checks for requested Bronze and Silver partitions. |
 | Output verification | `data/quality/verify_outputs.py` | Runs the Gold data contracts in `data/contracts/` through datacontract-cli, then checks the requested dates. |
-| dbt | `data/dbt/` | DuckDB models compiled and executed against MinIO in CI. |
+| SQLMesh | `data/sqlmesh/` | DuckDB models with audits, unit-tested in the lint job and built against MinIO in CI. |
 | AI brief | `data/reporting/ai_brief.py` | Anomaly fact-check, country briefings, and the seasonal spotlight from Gemini. |
 | Report | `docs/pipeline_report.ipynb` | Reads Gold, writes the HTML report, readiness CSV, and eight charts. The weather chart follows the season set in `data/reporting/season.py`. |
 
@@ -113,11 +113,15 @@ WAQI `iaqi` values are index values. They are retained for coverage and general
 reporting, but the anomaly model excludes WAQI until a valid conversion to
 concentration is implemented.
 
-## dbt
+## SQLMesh
 
-dbt reads Silver Parquet files through DuckDB `httpfs` with Hive partitioning.
-The models are a validation and analytics surface in MinIO-backed CI. They are
-not materialized by the daily B2 workflow.
+SQLMesh reads Silver Parquet files through DuckDB `httpfs` with Hive
+partitioning. The models are a validation and analytics surface in
+MinIO-backed CI. They are not materialized by the daily B2 workflow.
+
+Each model declares its audits in its `MODEL` block, and a failed audit fails
+`sqlmesh plan`. A unit test in `data/sqlmesh/tests/` pins the WHO streak logic
+on fixture rows, so the lint job checks the SQL without any lake data.
 
 Current marts:
 
@@ -143,7 +147,7 @@ under `grafana/`.
 
 | Workflow | Responsibility |
 |---|---|
-| `ci-data.yml` | Ruff, Black, unit coverage, dbt compile, Compose validation, image builds, MinIO integration, Gold contracts, dbt run/test. |
+| `ci-data.yml` | Ruff, Black, unit coverage, SQLMesh unit tests, Compose validation, image builds, MinIO integration, Gold contracts, SQLMesh plan and audits. |
 | `ci-infra.yml` | Prometheus rules/config and Alertmanager validation. |
 | `cd-deploy.yml` | Builds and publishes commit-SHA, branch, and latest GHCR images. |
 | `pipeline-run.yml` | Runs the real B2 pipeline and verifies requested outputs. |

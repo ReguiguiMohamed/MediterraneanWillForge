@@ -1,7 +1,7 @@
 # Local tools and environments
 .claude/
 .venv/
-.dbt-venv/
+.sqlmesh-venv/
 venv/
 .env
 .vscode/
@@ -24,11 +24,9 @@ coverage*.json
 *.ipynb
 !docs/pipeline_report.ipynb
 
-# dbt and DuckDB
-data/dbt/.user.yml
-data/dbt/target/
-data/dbt/dbt_packages/
-data/dbt/logs/
+# SQLMesh and DuckDB
+data/sqlmesh/.cache/
+data/sqlmesh/logs/
 *.duckdb
 *.duckdb.wal
 

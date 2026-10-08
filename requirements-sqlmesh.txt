@@ -1,0 +1,3 @@
+# SQLMesh pins its own sqlglot, so it stays out of the runtime and dev
+# environments.
+sqlmesh==0.236.2

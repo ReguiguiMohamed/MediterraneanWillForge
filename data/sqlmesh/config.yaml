@@ -1,0 +1,21 @@
+# SQLMesh runs DuckDB in-process and reads Silver Parquet from MinIO over
+# httpfs. Every value defaults to local MinIO, which is what CI starts.
+gateways:
+  minio:
+    connection:
+      type: duckdb
+      database: "{{ env_var('SQLMESH_DUCKDB_PATH', '/tmp/med_ops_sqlmesh.duckdb') }}"
+      extensions:
+        - httpfs
+      secrets:
+        - type: s3
+          key_id: "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"
+          secret: "{{ env_var('MINIO_SECRET_KEY', 'minioadmin') }}"
+          endpoint: "{{ env_var('MINIO_HOST', 'localhost:9000') }}"
+          use_ssl: false
+          url_style: path
+
+default_gateway: minio
+
+model_defaults:
+  dialect: duckdb
