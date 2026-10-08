@@ -270,4 +270,16 @@ tests/               unit and MinIO integration tests
 - Hosted runs need B2 and WAQI secrets. Grafana and `GEMINI_API_KEY` are optional.
 - No SLA, no Kubernetes, no secrets manager. cAdvisor wants a Linux host.
 
+## Credits
+
+Two open source projects carry the checks this pipeline relies on. Thanks to
+their maintainers and contributors.
+
+- [datacontract-cli](https://github.com/datacontract/datacontract-cli) (MIT)
+  by Jochen Christ, Stefan Negele, Simon Harrer and contributors. It tests
+  every Gold table against its ODCS contract in `data/contracts/`.
+- [SQLMesh](https://github.com/SQLMesh/sqlmesh) (Apache 2.0) by the SQLMesh
+  contributors, started at Tobiko Data. It builds, audits and unit tests the
+  DuckDB models in `data/sqlmesh/`.
+
 Release history is in [CHANGELOG.md](CHANGELOG.md).
