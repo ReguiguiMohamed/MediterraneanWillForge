@@ -1,19 +1,57 @@
-# MediterraneanWillForge
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="MediterraneanWillForge logo: a sun setting over three waves in bronze, silver and gold" width="168">
+</p>
 
-[![Data CI](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-data.yml/badge.svg)](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-data.yml)
-[![Infrastructure CI](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-infra.yml/badge.svg)](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-infra.yml)
-[![Scheduled pipeline](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/pipeline-run.yml/badge.svg)](https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/pipeline-run.yml)
-[![Latest release](https://img.shields.io/github/v/release/ReguiguiMohamed/MediterraneanWillForge)](https://github.com/ReguiguiMohamed/MediterraneanWillForge/releases)
+<h1 align="center">MediterraneanWillForge</h1>
 
-An air-quality and weather lakehouse for the Mediterranean and North Africa,
-running every day on real data from Open-Meteo, OpenAQ, and WAQI. Nothing here
-is synthetic.
+<p align="center">
+  An air-quality and weather lakehouse for the Mediterranean and North Africa,<br>
+  rebuilt every day from real Open-Meteo, OpenAQ and WAQI data.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-data.yml"><img src="https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-data.yml/badge.svg" alt="Data CI"></a>
+  <a href="https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-infra.yml"><img src="https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/ci-infra.yml/badge.svg" alt="Infrastructure CI"></a>
+  <a href="https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/pipeline-run.yml"><img src="https://github.com/ReguiguiMohamed/MediterraneanWillForge/actions/workflows/pipeline-run.yml/badge.svg" alt="Scheduled pipeline"></a>
+  <a href="https://github.com/ReguiguiMohamed/MediterraneanWillForge/releases"><img src="https://img.shields.io/github/v/release/ReguiguiMohamed/MediterraneanWillForge" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <a href="https://reguiguimohamed.github.io/MediterraneanWillForge/"><b>Live report</b></a>
+  ·
+  <a href="docs/architecture.md">Architecture</a>
+  ·
+  <a href="docs/adr/001-lakehouse-format.md">ADR-001</a>
+  ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+<br>
 
 A GitHub Actions cron builds Bronze, Silver, and Gold Delta tables on Backblaze
 B2, runs quality checks and anomaly detection, then publishes a fresh report to
-GitHub Pages.
+GitHub Pages. Nothing here is synthetic.
 
-**[Open the published report](https://reguiguimohamed.github.io/MediterraneanWillForge/)**
+```mermaid
+flowchart LR
+    meteo["Open-Meteo<br/>CAMS air quality"] --> bronze
+    era5["Open-Meteo<br/>ERA5 weather"] --> bronze
+    openaq["OpenAQ v3"] --> bronze
+    waqi["WAQI"] --> bronze
+    bronze[("Bronze")] --> silver[("Silver")]
+    silver --> gold[("Gold<br/>marts, alerts, anomalies")]
+    gold --> report["Report and AI brief<br/>on GitHub Pages"]
+    bronze -.-> checks{{"Quality checks"}}
+    silver -.-> checks
+    gold -.-> contracts{{"ODCS contracts"}}
+
+    classDef bz fill:#c8833f,stroke:#8a5526,color:#1b1b1b
+    classDef sv fill:#d5dbe2,stroke:#8a96a3,color:#1b1b1b
+    classDef gd fill:#f2c14e,stroke:#b8891f,color:#1b1b1b
+    class bronze bz
+    class silver sv
+    class gold gd
+```
 
 ## Data
 
@@ -24,7 +62,8 @@ GitHub Pages.
 | OpenAQ v3 | Daily station aggregates across nine countries | `s3://bronze/openaq/air_quality` |
 | WAQI | Current station readings for 15 city searches | `s3://bronze/waqi/air_quality` |
 
-Silver lands in `s3://silver/air_quality`:
+<details>
+<summary>Silver lands in <code>s3://silver/air_quality</code></summary>
 
 ```text
 station_id, station_name, city, country_code, latitude, longitude, date,
@@ -33,12 +72,15 @@ who_pm25_exceed, who_pm10_exceed, who_no2_exceed, who_o3_exceed,
 data_completeness, source, silver_ts, partition_date
 ```
 
+</details>
+
 Roughly half of all rows carry a pollutant reading but no PM2.5, almost always
 because the station has no PM2.5 sensor at all. Those are filled from the CAMS
 model at the station's own coordinates, and `pm2_5_source` records which is
 which: `ground_sensor`, `model_estimated`, or `model_grid`.
 
-Weather lands separately in `s3://silver/weather`, one row per city per day:
+<details>
+<summary>Weather lands separately in <code>s3://silver/weather</code>, one row per city per day</summary>
 
 ```text
 station_id, station_name, country_code, latitude, longitude, date,
@@ -46,6 +88,8 @@ temp_max_c, temp_min_c, temp_mean_c, apparent_temp_max_c, precipitation_mm,
 wind_speed_max_kmh, wind_gust_max_kmh, humidity_pct, weather_code, dust,
 condition, wind_level, dust_level, source, silver_ts, partition_date
 ```
+
+</details>
 
 `condition` comes from the WMO present-weather code (clear, cloudy, fog,
 drizzle, rain, snow, thunderstorm). `wind_level` bands the day's strongest gust
@@ -99,18 +143,9 @@ season shows, edit [`data/reporting/season.py`](data/reporting/season.py).
 
 ## Architecture
 
-```text
-Open-Meteo air quality ---\
-Open-Meteo ERA5 weather ---+--> Bronze --> Silver --> Gold --> report + Pages
-OpenAQ --------------------+
-WAQI ----------------------/
-                         |
-                         +--> quality checks
-                         +--> SQLMesh/DuckDB in MinIO CI
-                         +--> Grafana Cloud metrics (best effort)
-
-Hosted lake: Backblaze B2        Local and CI lake: MinIO
-```
+The hosted lake is Backblaze B2. Local runs and CI use MinIO, where SQLMesh on
+DuckDB also builds and audits the Gold models. Every stage pushes Grafana Cloud
+metrics on a best-effort basis.
 
 Every Delta write is followed by a checkpoint, so later reads skip replaying the
 log. That matters, because the B2 free tier caps Class B transactions per day
@@ -138,19 +173,32 @@ Pages rather than committed, which keeps five months of regenerated PNGs out of
 the git history. The notebook that produces them is
 [`docs/pipeline_report.ipynb`](docs/pipeline_report.ipynb).
 
-**Station coverage by country and date**
-![Coverage heatmap](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/coverage_heatmap.png)
-
-**WHO guideline exceedance**
-![WHO exceedance](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/who_exceedance.png)
-
-**Seasonal weather per country**: nightly lows and cold waves in winter,
-Saharan dust in spring, highs and heatwaves in summer, rain in autumn.
-![Seasonal weather](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/seasonal_weather.png)
-
-**Top anomaly of the day**, plotted against that day's spread across every
-station, so you can see why the model flagged it.
-![Top anomaly](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/top_anomaly.png)
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <b>Station coverage by country and date</b><br><br>
+      <img src="https://reguiguimohamed.github.io/MediterraneanWillForge/assets/coverage_heatmap.png" alt="Coverage heatmap">
+    </td>
+    <td width="50%" valign="top">
+      <b>WHO guideline exceedance</b><br><br>
+      <img src="https://reguiguimohamed.github.io/MediterraneanWillForge/assets/who_exceedance.png" alt="WHO exceedance">
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>Seasonal weather per country</b><br>
+      Nightly lows and cold waves in winter, Saharan dust in spring, highs and
+      heatwaves in summer, rain in autumn.<br><br>
+      <img src="https://reguiguimohamed.github.io/MediterraneanWillForge/assets/seasonal_weather.png" alt="Seasonal weather">
+    </td>
+    <td valign="top">
+      <b>Top anomaly of the day</b><br>
+      Plotted against that day's spread across every station, so you can see
+      why the model flagged it.<br><br>
+      <img src="https://reguiguimohamed.github.io/MediterraneanWillForge/assets/top_anomaly.png" alt="Top anomaly">
+    </td>
+  </tr>
+</table>
 
 Also: [anomaly detection](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/anomaly_detection.png),
 [source coverage](https://reguiguimohamed.github.io/MediterraneanWillForge/assets/source_coverage.png),
@@ -240,19 +288,25 @@ output contracts, runs SQLMesh, and validates the Prometheus and Alertmanager co
 
 ## Layout
 
-```text
-.github/workflows/   CI, publishing, pipeline, and report workflows
-data/ingestion/      Bronze, Silver, and Gold jobs
-data/quality/        Bronze and Silver checks, Gold contract runner
-data/contracts/      Gold data contracts (ODCS, run by datacontract-cli)
-data/sqlmesh/        SQLMesh models, audits and unit tests on DuckDB
-data/reporting/      report analytics and the AI brief
-docker/              job images and the local Compose stack
-monitoring/          local Prometheus and Alertmanager config
-grafana/             Grafana Cloud dashboard export
-docs/                architecture, ADR, and the report notebook
-tests/               unit and MinIO integration tests
-```
+| Path | Contents |
+| --- | --- |
+| [`.github/workflows/`](.github/workflows/) | CI, publishing, pipeline, and report workflows |
+| [`data/ingestion/`](data/ingestion/) | Bronze, Silver, and Gold jobs |
+| [`data/quality/`](data/quality/) | Bronze and Silver checks, Gold contract runner |
+| [`data/contracts/`](data/contracts/) | Gold data contracts (ODCS, run by datacontract-cli) |
+| [`data/sqlmesh/`](data/sqlmesh/) | SQLMesh models, audits and unit tests on DuckDB |
+| [`data/reporting/`](data/reporting/) | Report analytics and the AI brief |
+| [`docker/`](docker/) | Job images and the local Compose stack |
+| [`monitoring/`](monitoring/) | Local Prometheus and Alertmanager config |
+| [`grafana/`](grafana/) | Grafana Cloud dashboard export |
+| [`docs/`](docs/) | Architecture, ADR, and the report notebook |
+| [`tests/`](tests/) | Unit and MinIO integration tests |
+
+## Built with
+
+Python 3.11, Delta Lake (`deltalake` 0.18), pandas, scikit-learn, Great
+Expectations, datacontract-cli, SQLMesh on DuckDB, Docker Compose, MinIO,
+Backblaze B2, Prometheus, Grafana Cloud, Gemini, GitHub Actions and Pages.
 
 ## Limits
 
@@ -283,3 +337,7 @@ their maintainers and contributors.
   DuckDB models in `data/sqlmesh/`.
 
 Release history is in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE). Built by [ReguiguiMohamed](https://github.com/ReguiguiMohamed).
